@@ -7,7 +7,9 @@ import {
   buildCompressionHint,
 } from "./agent/context"
 import { initializeState, refreshState } from "./tools/memory-store"
-import { loadState, saveState } from "./tools/intervention"
+import { autoIntervene, loadState, saveState } from "./tools/intervention"
+import { scheduleWeek } from "./tools/scheduler"
+import { calculateRisk } from "./tools/risk-predict"
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -21,6 +23,74 @@ async function ensureState() {
   const existing = await loadState()
   if (existing) return existing
   return initializeState()
+}
+
+function parseDailyHours(input: string): number | null {
+  const matched = input.match(/每天\s*(\d+(?:\.\d+)?)\s*小时/u)
+  if (!matched) return null
+  const value = Number(matched[1])
+  if (!Number.isFinite(value) || value <= 0) return null
+  return value
+}
+
+function isRateLimitError(error: unknown): boolean {
+  const message = (error as Error)?.message?.toLowerCase() ?? ""
+  return message.includes("rate limit") || message.includes("rpm") || message.includes("429")
+}
+
+async function runLocalFallback(question: string): Promise<string> {
+  const baseState = await refreshState()
+  const dailyHours = parseDailyHours(question)
+  const availableHours = dailyHours ? Math.round(dailyHours * 7 * 10) / 10 : baseState.weeklyAvailableHours
+
+  if (dailyHours) {
+    baseState.weeklyAvailableHours = availableHours
+    await saveState(baseState)
+  }
+
+  const schedule = await scheduleWeek(availableHours)
+  const risk = await calculateRisk()
+  const interventionText = await autoIntervene(risk.riskLevel, baseState.consecutiveMissedDays)
+  const finalState = await refreshState()
+
+  const scheduleRows = schedule.allocations.length
+    ? schedule.allocations
+        .map(
+          (row) =>
+            `| ${row.title} | ${row.weight.toFixed(2)} | ${row.allocatedHours.toFixed(1)} | ${row.priority} | ${schedule.overload ? "超载时保留高权重" : "正常推进"} |`
+        )
+        .join("\n")
+    : "| - | - | - | - | 当前无 in_progress/delayed 任务 |"
+
+  const interventionLines = interventionText
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  return [
+    "## 状态摘要",
+    `- 目标进度：共 ${finalState.goalTree.length} 个目标，已完成 ${Math.round(finalState.completionRate * 100)}%`,
+    `- 本周可用时间：${availableHours}h`,
+    `- 本周任务需求：${schedule.totalDemand.toFixed(1)}h`,
+    `- 关键偏差（延迟率/完成率/压力指数）：${risk.delayRate.toFixed(2)} / ${(risk.completionRate * 100).toFixed(1)}% / ${risk.stressIndex.toFixed(2)}`,
+    "",
+    "## 本周分配",
+    "| 目标/任务 | 权重 | 分配时长(h) | 优先级 | 说明 |",
+    "|---|---:|---:|---|---|",
+    scheduleRows,
+    "",
+    "## 风险等级",
+    `- 等级：${risk.riskLevel}`,
+    `- 触发指标：${risk.triggers.join("、") || "无"}`,
+    `- 主要风险源：${risk.triggers[0] ?? "暂无"}`,
+    `- 预测结论：${risk.riskLevel === "high" ? "高风险，已建议立即干预" : risk.riskLevel === "medium" ? "中风险，建议持续观察" : "低风险，保持当前节奏"}`,
+    "",
+    "## 干预动作",
+    `1. 动作：${interventionLines[0] ?? "无"}`,
+    "2. 影响对象：高风险或延迟目标",
+    "3. 执行时机：立即",
+    `4. 预期效果：${interventionLines[1] ?? "降低延期风险并稳定节奏"}`,
+  ].join("\n")
 }
 
 function printHelp() {
@@ -116,7 +186,17 @@ function prompt() {
         }
       }
     } catch (e) {
-      console.error(`\n\x1b[31m[错误] ${(e as Error).message}\x1b[0m`)
+      if (isRateLimitError(e)) {
+        console.warn("\n\x1b[33m[模型限流，已切换本地降级流程并继续执行]\x1b[0m")
+        try {
+          const fallback = await runLocalFallback(question)
+          console.log(fallback)
+        } catch (fallbackError) {
+          console.error(`\n\x1b[31m[降级流程失败] ${(fallbackError as Error).message}\x1b[0m`)
+        }
+      } else {
+        console.error(`\n\x1b[31m[错误] ${(e as Error).message}\x1b[0m`)
+      }
     }
 
     prompt()

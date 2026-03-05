@@ -20,5 +20,27 @@
     "estimatedHours": 400,
     "actualHours": 0,
     "status": "pending"
+  },
+  {
+    "id": "g1772679821671",
+    "title": "考研北京大学计算机科学专业",
+    "parentId": null,
+    "longTermValue": 1,
+    "urgency": 0.9,
+    "deadline": "2025-12-20",
+    "estimatedHours": 1600,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772679828461",
+    "title": "数学一（满分150，目标130+）",
+    "parentId": "g1772679821671",
+    "longTermValue": 1,
+    "urgency": 0.95,
+    "deadline": "2025-12-20",
+    "estimatedHours": 480,
+    "actualHours": 0,
+    "status": "pending"
   }
 ]

@@ -1,7 +1,7 @@
 import { loadGoalTree, calculateWeight } from "./goal-tree"
 import type { StudyState } from "../agent/context"
 
-interface RiskMetrics {
+export interface RiskMetrics {
   delayRate: number
   completionRate: number
   stressIndex: number
