@@ -2,7 +2,42 @@ import type { CoreMessage } from "ai"
 import { generateText } from "ai"
 import { model } from "./provider"
 
-// 主流模型上下文长度（以 128k 为例，调整此值适配不同模型）
+// ========== 新增：学习状态结构 ==========
+export interface GoalNode {
+  id: string
+  title: string
+  parentId: string | null
+  longTermValue: number // 0-1，长期重要性
+  urgency: number // 0-1，紧急程度
+  deadline: string | null // ISO 8601
+  estimatedHours: number
+  actualHours: number
+  status: "pending" | "in_progress" | "completed" | "delayed"
+}
+
+export interface StudyState {
+  // 目标树
+  goalTree: GoalNode[]
+
+  // 时间预算
+  weeklyAvailableHours: number // 本周可用总时长
+  weeklyDemandHours: number // 本周任务需求总时长
+
+  // 风险指标
+  delayRate: number // 延迟率 = 实际完成时间 / 计划完成时间
+  completionRate: number // 完成率 = 已完成 / 计划完成
+  stressIndex: number // 压力指数 = 未完成高优任务数 × 权重
+
+  // 行为状态
+  consecutiveMissedDays: number // 连续未完成天数
+  fatigueScore: number // 疲劳度 0-1
+  interventionMode: "normal" | "light" | "sprint" // 当前策略模式
+
+  // 风险等级
+  riskLevel: "low" | "medium" | "high"
+}
+
+// ========== 原有压缩逻辑保持，新增状态序列化 ==========
 const MODEL_CONTEXT_LIMIT = 128_000
 // 超过 80% 时触发压缩，留余量给 LLM 输出和工具结果
 const COMPRESS_THRESHOLD = 0.8
@@ -69,4 +104,46 @@ export function buildCompressionHint(summary: string): string {
     "注意：以上是对之前执行历史的摘要，你处于重建会话状态。",
     "请基于摘要继续完成原始任务，不要重复已完成的操作。",
   ].join("\n")
+}
+
+// ========== 新增：状态序列化为 Prompt Hint ==========
+export function buildStateHint(state: StudyState): string {
+  const sections: string[] = []
+
+  // 1. 目标树摘要
+  const activeGoals = state.goalTree.filter(
+    (g) => g.status === "in_progress" || g.status === "delayed"
+  )
+  sections.push("## 当前活跃目标")
+  sections.push(
+    activeGoals
+      .map(
+        (g) =>
+          `- [${g.status}] ${g.title} (剩余: ${g.estimatedHours - g.actualHours}h, DDL: ${g.deadline || "无"})`
+      )
+      .join("\n")
+  )
+
+  // 2. 时间预算
+  sections.push("\n## 时间预算")
+  sections.push(`- 本周可用: ${state.weeklyAvailableHours}h`)
+  sections.push(`- 本周需求: ${state.weeklyDemandHours}h`)
+  sections.push(
+    `- 负载率: ${((state.weeklyDemandHours / state.weeklyAvailableHours) * 100).toFixed(1)}%`
+  )
+
+  // 3. 风险指标
+  sections.push("\n## 风险指标")
+  sections.push(`- 延迟率: ${state.delayRate.toFixed(2)}`)
+  sections.push(`- 完成率: ${(state.completionRate * 100).toFixed(1)}%`)
+  sections.push(`- 压力指数: ${state.stressIndex.toFixed(2)}`)
+  sections.push(`- 风险等级: ${state.riskLevel}`)
+
+  // 4. 行为状态
+  sections.push("\n## 行为状态")
+  sections.push(`- 连续未完成: ${state.consecutiveMissedDays} 天`)
+  sections.push(`- 疲劳度: ${(state.fatigueScore * 100).toFixed(1)}%`)
+  sections.push(`- 策略模式: ${state.interventionMode}`)
+
+  return sections.join("\n")
 }

@@ -1,9 +1,5 @@
 import { join } from "path"
-
-// 系统提示词分三段拼装：
-//   Segment 1: 静态核心指令（SYSTEM_PROMPT.md）
-//   Segment 2: 工具使用补充说明（动态，随工具增减自动更新）
-//   Segment 3: 运行时状态（可选，如上下文压缩摘要）
+import { buildStateHint, type StudyState } from "./context"
 
 const PROMPT_FILE = join(import.meta.dir, "../SYSTEM_PROMPT.md")
 
@@ -23,6 +19,7 @@ const HARD_CONSTRAINTS = `
 `.trim()
 
 export async function assembleSystemPrompt(
+  state?: StudyState, // 新增：学习状态
   runtimeHints: string[] = []
 ): Promise<string> {
   const segments: string[] = []
@@ -30,12 +27,17 @@ export async function assembleSystemPrompt(
   // Segment 1: 静态指令
   segments.push(await Bun.file(PROMPT_FILE).text())
 
-  // Segment 2: 强制约束（始终注入）
+  // Segment 2: 强制约束
   segments.push(HARD_CONSTRAINTS)
 
-  // Segment 3: 运行时状态（有则注入）
+  // Segment 3: 当前学习状态（核心）
+  if (state) {
+    segments.push("---\n# 当前学习状态\n\n" + buildStateHint(state))
+  }
+
+  // Segment 4: 其他运行时状态
   if (runtimeHints.length > 0) {
-    segments.push("---\n# 运行时状态\n\n" + runtimeHints.join("\n\n"))
+    segments.push("---\n# 其他运行时状态\n\n" + runtimeHints.join("\n\n"))
   }
 
   return segments.join("\n\n")
