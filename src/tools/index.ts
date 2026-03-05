@@ -5,6 +5,11 @@ import { writeFile } from "./write-file"
 import { editFile } from "./edit-file"
 import { bash } from "./bash"
 import { webFetch } from "./web-fetch"
+import { addGoal, updateGoal, getGoalSummary } from "./goal-tree"
+import { generateScheduleReport } from "./scheduler"
+import { generateRiskReport } from "./risk-predict"
+import { autoIntervene } from "./intervention"
+import { initializeState, refreshState } from "./memory-store"
 
 // 工具注册表
 // Vercel AI SDK 的 tool() 封装了参数 schema（Zod）和执行函数
@@ -15,8 +20,14 @@ export const TOOLS = {
       "读取本地文件内容。大文件建议用 offset + limit 分段读取，避免一次性读取撑爆上下文。输出带行号，方便定位。",
     parameters: z.object({
       path: z.string().describe("文件路径（相对于当前工作目录）"),
-      offset: z.number().optional().describe("从第几行开始读（0-indexed，默认从头）"),
-      limit: z.number().optional().describe("最多读取多少行（默认读到文件末尾）"),
+      offset: z
+        .number()
+        .optional()
+        .describe("从第几行开始读（0-indexed，默认从头）"),
+      limit: z
+        .number()
+        .optional()
+        .describe("最多读取多少行（默认读到文件末尾）"),
     }),
     execute: readFile,
   }),
@@ -62,5 +73,102 @@ export const TOOLS = {
       url: z.string().describe("要抓取的完整 URL（包含 https://）"),
     }),
     execute: webFetch,
+  }),
+
+  // ========== 新增：学习 Agent 核心工具 ==========
+  add_goal: tool({
+    description: "添加新的学习目标到目标树",
+    parameters: z.object({
+      title: z.string().describe("目标名称"),
+      parentId: z.string().optional().describe("父目标 ID（可选）"),
+      longTermValue: z
+        .number()
+        .min(0)
+        .max(1)
+        .describe("长期价值 0-1"),
+      urgency: z
+        .number()
+        .min(0)
+        .max(1)
+        .describe("紧急程度 0-1"),
+      deadline: z
+        .string()
+        .optional()
+        .describe("截止日期 ISO 8601"),
+      estimatedHours: z
+        .number()
+        .describe("预计所需小时数"),
+    }),
+    execute: addGoal,
+  }),
+
+  update_goal: tool({
+    description: "更新目标的完成情况",
+    parameters: z.object({
+      id: z.string().describe("目标 ID"),
+      actualHours: z
+        .number()
+        .optional()
+        .describe("实际完成小时数"),
+      status: z
+        .enum(["pending", "in_progress", "completed", "delayed"])
+        .optional(),
+    }),
+    execute: updateGoal,
+  }),
+
+  get_goal_summary: tool({
+    description: "获取当前所有目标的摘要",
+    parameters: z.object({}),
+    execute: getGoalSummary,
+  }),
+
+  generate_schedule: tool({
+    description: "生成本周时间分配计划",
+    parameters: z.object({
+      availableHours: z
+        .number()
+        .describe("本周可用总小时数"),
+    }),
+    execute: async ({ availableHours }) => generateScheduleReport(availableHours),
+  }),
+
+  assess_risk: tool({
+    description: "评估当前学习风险等级",
+    parameters: z.object({}),
+    execute: generateRiskReport,
+  }),
+
+  intervene: tool({
+    description: "执行自动干预策略",
+    parameters: z.object({
+      riskLevel: z
+        .enum(["low", "medium", "high"])
+        .describe("当前风险等级"),
+      consecutiveMissed: z
+        .number()
+        .describe("连续未完成天数"),
+    }),
+    execute: async ({ riskLevel, consecutiveMissed }) => {
+      return autoIntervene(riskLevel, consecutiveMissed)
+    },
+  }),
+
+  refresh_state: tool({
+    description: "刷新学习状态（重新计算所有指标）",
+    parameters: z.object({}),
+    execute: async () => {
+      const state = await refreshState()
+      return `状态已刷新：风险等级 ${state.riskLevel}，负载率 ${((state.weeklyDemandHours / state.weeklyAvailableHours) * 100).toFixed(1)}%`
+    },
+  }),
+
+  initialize_state: tool({
+    description: "初始化学习状态（首次运行或重置时使用）",
+    parameters: z.object({}),
+    execute: async () => {
+      await initializeState()
+      return "状态已初始化"
+    },
   }),
 }
