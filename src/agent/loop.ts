@@ -1,6 +1,7 @@
 import { generateText, type CoreMessage, type LanguageModelUsage } from "ai"
 import { model } from "./provider"
 import { assembleSystemPrompt } from "./prompt"
+import { buildStateHint, type StudyState } from "./context"
 import { TOOLS } from "../tools/index"
 
 export interface RunResult {
@@ -10,14 +11,60 @@ export interface RunResult {
   stepCount: number
 }
 
-// Agent 主循环
-// 封装 generateText + maxSteps，对外只暴露 run(question, history)
+// ========== 新增：Agent 决策循环（状态驱动） ==========
+export async function agentDecisionLoop(
+  state: StudyState, // 当前学习状态
+  userInstruction: string, // 用户指令（可选，如"生成本周计划"）
+  history: CoreMessage[] = []
+): Promise<RunResult> {
+  // 1. 组装系统提示词（注入状态）
+  const system = await assembleSystemPrompt(state, [])
+
+  // 2. 构建初始消息
+  const messages: CoreMessage[] = [
+    ...history,
+    {
+      role: "user",
+      content: userInstruction || "请基于当前状态生成本周学习计划",
+    },
+  ]
+
+  // 3. 执行决策循环
+  const result = await generateText({
+    model,
+    system,
+    messages,
+    tools: TOOLS,
+    maxSteps: 50,
+
+    onStepFinish: ({ text, toolCalls, finishReason }) => {
+      const isFinalStep = finishReason === "stop" && toolCalls.length === 0
+      if (!isFinalStep) {
+        printStep({ text, toolCalls, finishReason })
+      }
+    },
+  })
+
+  const stepCount = result.steps.length
+  if (stepCount > 1) {
+    console.log(`\n\x1b[90m[共执行 ${stepCount} 步]\x1b[0m\n`)
+  }
+
+  return {
+    text: result.text,
+    responseMessages: result.response.messages as CoreMessage[],
+    usage: result.usage,
+    stepCount,
+  }
+}
+
+// ========== 原有通用循环（保留兼容） ==========
 export async function agentLoop(
   question: string,
   history: CoreMessage[],
   runtimeHints: string[] = []
 ): Promise<RunResult> {
-  const system = await assembleSystemPrompt(runtimeHints)
+  const system = await assembleSystemPrompt(undefined, runtimeHints)
 
   // 将用户问题追加到 history（generateText 需要完整的 messages 数组）
   const messages: CoreMessage[] = [
@@ -56,6 +103,7 @@ export async function agentLoop(
   }
 }
 
+// ========== 打印辅助函数 ==========
 interface StepInfo {
   text: string
   toolCalls: Array<{ toolName: string; args: unknown }>

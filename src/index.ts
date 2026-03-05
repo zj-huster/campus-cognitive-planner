@@ -1,11 +1,12 @@
 import readline from "readline"
 import type { CoreMessage } from "ai"
-import { agentLoop, resetStepCounter } from "./agent/loop"
+import { agentLoop, agentDecisionLoop, resetStepCounter } from "./agent/loop"
 import {
   shouldCompress,
   compressHistory,
   buildCompressionHint,
 } from "./agent/context"
+import type { StudyState } from "./agent/context"
 
 // ── CLI 多轮对话 ──────────────────────────────────────────────────────────────
 
@@ -113,3 +114,62 @@ function printHelp() {
 
 console.log(`\x1b[1mcampus-cognitive-planner\x1b[0m \x1b[90mv0.1.0 — 输入 /help 查看帮助\x1b[0m\n`)
 prompt()
+
+// ========== 模拟初始状态（后续从文件/数据库加载） ==========
+const MOCK_STATE: StudyState = {
+  goalTree: [
+    {
+      id: "g1",
+      title: "高数强化",
+      parentId: null,
+      longTermValue: 0.9,
+      urgency: 0.8,
+      deadline: "2026-03-15T00:00:00Z",
+      estimatedHours: 20,
+      actualHours: 8,
+      status: "in_progress",
+    },
+    {
+      id: "g2",
+      title: "线代专项",
+      parentId: null,
+      longTermValue: 0.7,
+      urgency: 0.9,
+      deadline: "2026-03-10T00:00:00Z",
+      estimatedHours: 15,
+      actualHours: 7,
+      status: "delayed",
+    },
+  ],
+  weeklyAvailableHours: 50,
+  weeklyDemandHours: 62,
+  delayRate: 1.35,
+  completionRate: 0.675,
+  stressIndex: 8.42,
+  consecutiveMissedDays: 3,
+  fatigueScore: 0.72,
+  interventionMode: "light",
+  riskLevel: "high",
+}
+
+async function main() {
+  console.log("\x1b[1m\x1b[34m🎓 Campus Cognitive Planner - Agent Decision Loop\x1b[0m\n")
+
+  resetStepCounter()
+
+  // 调用决策循环
+  const result = await agentDecisionLoop(
+    MOCK_STATE,
+    "请生成本周学习计划，并进行风险评估和干预决策"
+  )
+
+  // 打印最终输出
+  console.log("\n\x1b[1m\x1b[33m━━━ 决策结果 ━━━\x1b[0m\n")
+  console.log(result.text)
+
+  console.log("\n\x1b[90m────────────────────────────────────────────")
+  console.log(`Token 用量: ${result.usage.totalTokens}`)
+  console.log(`决策步数: ${result.stepCount}\x1b[0m`)
+}
+
+main().catch(console.error)
