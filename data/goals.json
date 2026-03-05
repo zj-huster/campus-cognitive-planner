@@ -1,0 +1,24 @@
+[
+  {
+    "id": "g1772679520655",
+    "title": "考研北京大学计算机科学（2026年12月）",
+    "parentId": null,
+    "longTermValue": 1,
+    "urgency": 0.7,
+    "deadline": "2026-12-25",
+    "estimatedHours": 1200,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772679528594",
+    "title": "数学一复习（高数+线代+概率论）",
+    "parentId": "g1772679520655",
+    "longTermValue": 0.95,
+    "urgency": 0.8,
+    "deadline": "2026-12-25",
+    "estimatedHours": 400,
+    "actualHours": 0,
+    "status": "pending"
+  }
+]

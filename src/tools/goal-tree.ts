@@ -1,5 +1,7 @@
 import type { GoalNode } from "../agent/context"
 import { resolveSafePath } from "../utils/safety"
+import { mkdir } from "fs/promises"
+import { dirname } from "path"
 
 const GOALS_FILE = "data/goals.json"
 
@@ -34,7 +36,8 @@ export async function loadGoalTree(): Promise<GoalNode[]> {
 
 // 保存目标树
 export async function saveGoalTree(goals: GoalNode[]): Promise<void> {
-  const path = resolveSafePath(GOALS_FILE)
+  const path = resolveSafePath(GOALS_FILE, "write")
+  await mkdir(dirname(path), { recursive: true })
   await Bun.write(path, JSON.stringify(goals, null, 2))
 }
 

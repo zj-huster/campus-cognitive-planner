@@ -1,0 +1,12 @@
+{
+  "goalTree": [],
+  "weeklyAvailableHours": 50,
+  "weeklyDemandHours": 0,
+  "delayRate": 1,
+  "completionRate": 0,
+  "stressIndex": 0,
+  "consecutiveMissedDays": 0,
+  "fatigueScore": 0,
+  "interventionMode": "normal",
+  "riskLevel": "high"
+}

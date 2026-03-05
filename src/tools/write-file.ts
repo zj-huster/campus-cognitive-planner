@@ -10,7 +10,7 @@ interface Params {
 export async function writeFile({ path, content }: Params): Promise<string> {
   let safePath: string
   try {
-    safePath = resolveSafePath(path)
+    safePath = resolveSafePath(path, "write")
   } catch (e) {
     return `错误：${(e as Error).message}`
   }

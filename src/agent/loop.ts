@@ -1,7 +1,7 @@
 import { generateText, type CoreMessage, type LanguageModelUsage } from "ai"
 import { model } from "./provider"
 import { assembleSystemPrompt } from "./prompt"
-import { buildStateHint, type StudyState } from "./context"
+import type { StudyState } from "./context"
 import { TOOLS } from "../tools/index"
 
 export interface RunResult {
@@ -15,10 +15,11 @@ export interface RunResult {
 export async function agentDecisionLoop(
   state: StudyState, // 当前学习状态
   userInstruction: string, // 用户指令（可选，如"生成本周计划"）
-  history: CoreMessage[] = []
+  history: CoreMessage[] = [],
+  runtimeHints: string[] = []
 ): Promise<RunResult> {
   // 1. 组装系统提示词（注入状态）
-  const system = await assembleSystemPrompt(state, [])
+  const system = await assembleSystemPrompt(state, runtimeHints)
 
   // 2. 构建初始消息
   const messages: CoreMessage[] = [

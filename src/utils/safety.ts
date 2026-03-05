@@ -1,4 +1,4 @@
-import { resolve } from "path"
+import { isAbsolute, relative, resolve } from "path"
 
 // ── 危险命令检测 ──────────────────────────────────────────────────────────────
 
@@ -33,14 +33,30 @@ export function detectDanger(command: string): DangerLevel {
 // ── 路径安全检查 ──────────────────────────────────────────────────────────────
 
 // 防止路径穿越攻击：确保解析后的路径在当前工作目录内
-export function resolveSafePath(inputPath: string): string {
+type PathMode = "read" | "write"
+
+function isInsidePath(root: string, target: string): boolean {
+  const rel = relative(root, target)
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
+}
+
+export function resolveSafePath(inputPath: string, mode: PathMode = "read"): string {
   const cwd = process.cwd()
   const resolved = resolve(cwd, inputPath)
 
-  if (!resolved.startsWith(cwd + "/") && resolved !== cwd) {
+  if (!isInsidePath(cwd, resolved)) {
     throw new Error(
       `路径越界：${inputPath} 解析为 ${resolved}，超出工作目录 ${cwd}`
     )
+  }
+
+  if (mode === "write") {
+    const dataDir = resolve(cwd, "data")
+    if (!isInsidePath(dataDir, resolved)) {
+      throw new Error(
+        `写入被拒绝：仅允许写入 data/ 目录。目标路径：${inputPath}`
+      )
+    }
   }
 
   return resolved

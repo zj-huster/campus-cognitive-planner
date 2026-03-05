@@ -1,5 +1,7 @@
 import { resolveSafePath } from "../utils/safety"
 import type { StudyState } from "../agent/context"
+import { mkdir } from "fs/promises"
+import { dirname } from "path"
 
 const STATE_FILE = "data/state.json"
 
@@ -19,7 +21,8 @@ export async function loadState(): Promise<StudyState | null> {
 
 // 保存学习状态
 export async function saveState(state: StudyState): Promise<void> {
-  const path = resolveSafePath(STATE_FILE)
+  const path = resolveSafePath(STATE_FILE, "write")
+  await mkdir(dirname(path), { recursive: true })
   await Bun.write(path, JSON.stringify(state, null, 2))
 }
 

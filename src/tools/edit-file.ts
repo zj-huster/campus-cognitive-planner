@@ -13,7 +13,7 @@ export async function editFile({
 }: Params): Promise<string> {
   let safePath: string
   try {
-    safePath = resolveSafePath(path)
+    safePath = resolveSafePath(path, "write")
   } catch (e) {
     return `错误：${(e as Error).message}`
   }
