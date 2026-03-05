@@ -11,6 +11,7 @@ import { autoIntervene, loadState, saveState } from "./tools/intervention"
 import { scheduleWeek } from "./tools/scheduler"
 import { calculateRisk } from "./tools/risk-predict"
 
+//全局变量
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout,
@@ -19,12 +20,14 @@ const rl = readline.createInterface({
 let history: CoreMessage[] = []
 let runtimeHints: string[] = []
 
+//初始化状态，确保每次启动都有一个基础状态可用
 async function ensureState() {
   const existing = await loadState()
   if (existing) return existing
   return initializeState()
 }
 
+//解析用户输入的每天可用小时数
 function parseDailyHours(input: string): number | null {
   const matched = input.match(/每天\s*(\d+(?:\.\d+)?)\s*小时/u)
   if (!matched) return null
@@ -33,13 +36,17 @@ function parseDailyHours(input: string): number | null {
   return value
 }
 
+//错误识别：调用本地降级流程
 function isRateLimitError(error: unknown): boolean {
   const message = (error as Error)?.message?.toLowerCase() ?? ""
   return message.includes("rate limit") || message.includes("rpm") || message.includes("429")
 }
 
+//本地降级流程：在模型不可用时，基于当前状态和简单规则生成回答
 async function runLocalFallback(question: string): Promise<string> {
+  //取最新状态
   const baseState = await refreshState()
+  //解析每日工作时间
   const dailyHours = parseDailyHours(question)
   const availableHours = dailyHours ? Math.round(dailyHours * 7 * 10) / 10 : baseState.weeklyAvailableHours
 
@@ -48,9 +55,13 @@ async function runLocalFallback(question: string): Promise<string> {
     await saveState(baseState)
   }
 
+  //周计划分配
   const schedule = await scheduleWeek(availableHours)
+  //风险评估
   const risk = await calculateRisk()
+  //根据风险评估生成干预建议
   const interventionText = await autoIntervene(risk.riskLevel, baseState.consecutiveMissedDays)
+  //拿到最终同步状态
   const finalState = await refreshState()
 
   const scheduleRows = schedule.allocations.length
@@ -95,8 +106,7 @@ async function runLocalFallback(question: string): Promise<string> {
 
 function printHelp() {
   console.log(`
-\x1b[1mcampus-cognitive-planner\x1b[0m — 教学用 Code Agent
-
+\x1b[1mcampus-cognitive-planner\x1b[0m — 校园效率规划Agent]
 \x1b[1m可用命令：\x1b[0m
   /reset   清空当前会话历史，重新开始
   /exit    退出
@@ -154,6 +164,7 @@ function prompt() {
     resetStepCounter()
 
     try {
+      //获取当前状态并进入决策循环
       const state = await refreshState()
       const { text, responseMessages, usage, stepCount } = await agentDecisionLoop(
         state,
@@ -186,6 +197,7 @@ function prompt() {
         }
       }
     } catch (e) {
+      //错误识别：调用本地降级流程
       if (isRateLimitError(e)) {
         console.warn("\n\x1b[33m[模型限流，已切换本地降级流程并继续执行]\x1b[0m")
         try {
