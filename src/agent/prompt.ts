@@ -19,7 +19,7 @@ const HARD_CONSTRAINTS = `
 `.trim()
 
 export async function assembleSystemPrompt(
-  state?: StudyState, // 新增：学习状态
+  state?: StudyState, 
   runtimeHints: string[] = []
 ): Promise<string> {
   const segments: string[] = []

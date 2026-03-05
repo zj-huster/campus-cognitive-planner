@@ -2,7 +2,7 @@ import type { CoreMessage } from "ai"
 import { generateText } from "ai"
 import { model } from "./provider"
 
-// ========== 新增：学习状态结构 ==========
+// ========== 学习状态结构 ==========
 export interface GoalNode {
   id: string
   title: string
