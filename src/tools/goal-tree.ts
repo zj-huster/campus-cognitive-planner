@@ -20,6 +20,16 @@ interface UpdateGoalParams {
   status?: GoalNode["status"]
 }
 
+// ========== 互斥锁实现 ==========
+let operationQueue: Promise<any> = Promise.resolve()
+
+function withLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = operationQueue.then(operation)
+  operationQueue = result.catch(() => {}) // 确保失败不会阻塞后续操作
+  return result
+}
+// ================================
+
 // 读取目标树
 export async function loadGoalTree(): Promise<GoalNode[]> {
   try {
@@ -41,46 +51,50 @@ export async function saveGoalTree(goals: GoalNode[]): Promise<void> {
   await Bun.write(path, JSON.stringify(goals, null, 2))
 }
 
-// 添加目标
+// 添加目标（带锁）
 export async function addGoal(params: AddGoalParams): Promise<string> {
-  const goals = await loadGoalTree()
-  
-  const newGoal: GoalNode = {
-    id: `g${Date.now()}`,
-    title: params.title,
-    parentId: params.parentId || null,
-    longTermValue: params.longTermValue,
-    urgency: params.urgency,
-    deadline: params.deadline || null,
-    estimatedHours: params.estimatedHours,
-    actualHours: 0,
-    status: "pending",
-  }
-  
-  goals.push(newGoal)
-  await saveGoalTree(goals)
-  
-  return `success: 已添加目标 "${params.title}" (ID: ${newGoal.id})`
+  return withLock(async () => {
+    const goals = await loadGoalTree()
+    
+    const newGoal: GoalNode = {
+      id: `g${Date.now()}`,
+      title: params.title,
+      parentId: params.parentId || null,
+      longTermValue: params.longTermValue,
+      urgency: params.urgency,
+      deadline: params.deadline || null,
+      estimatedHours: params.estimatedHours,
+      actualHours: 0,
+      status: "pending",
+    }
+    
+    goals.push(newGoal)
+    await saveGoalTree(goals)
+    
+    return `success: 已添加目标 "${params.title}" (ID: ${newGoal.id})`
+  })
 }
 
-// 更新目标
+// 更新目标（带锁）
 export async function updateGoal(params: UpdateGoalParams): Promise<string> {
-  const goals = await loadGoalTree()
-  const goal = goals.find((g) => g.id === params.id)
-  
-  if (!goal) {
-    return `错误：目标 ${params.id} 不存在`
-  }
-  
-  if (params.actualHours !== undefined) {
-    goal.actualHours = params.actualHours
-  }
-  if (params.status) {
-    goal.status = params.status
-  }
-  
-  await saveGoalTree(goals)
-  return `success: 已更新目标 "${goal.title}"`
+  return withLock(async () => {
+    const goals = await loadGoalTree()
+    const goal = goals.find((g) => g.id === params.id)
+    
+    if (!goal) {
+      return `错误：目标 ${params.id} 不存在`
+    }
+    
+    if (params.actualHours !== undefined) {
+      goal.actualHours = params.actualHours
+    }
+    if (params.status) {
+      goal.status = params.status
+    }
+    
+    await saveGoalTree(goals)
+    return `success: 已更新目标 "${goal.title}"`
+  })
 }
 
 // 计算任务权重

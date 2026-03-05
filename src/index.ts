@@ -106,7 +106,7 @@ async function runLocalFallback(question: string): Promise<string> {
 
 function printHelp() {
   console.log(`
-\x1b[1mcampus-cognitive-planner\x1b[0m — 校园效率规划Agent]
+\x1b[1mcampus-cognitive-planner\x1b[0m — 校园效率规划Agent
 \x1b[1m可用命令：\x1b[0m
   /reset   清空当前会话历史，重新开始
   /exit    退出
@@ -217,7 +217,7 @@ function prompt() {
 
 async function main() {
   await ensureState()
-  console.log(`\x1b[1mcampus-cognitive-planner\x1b[0m \x1b[90mv0.2.0 — 输入 /help 查看帮助\x1b[0m\n`)
+  console.log(`\x1b[1mcampus-cognitive-planner\x1b[0m \x1b[90mv0.0.1 — 输入 /help 查看帮助\x1b[0m\n`)
   prompt()
 }
 

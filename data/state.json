@@ -1,0 +1,68 @@
+{
+  "goalTree": [
+    {
+      "id": "g1772708866332",
+      "title": "考研北京大学计算机科学专业",
+      "parentId": null,
+      "longTermValue": 1,
+      "urgency": 0.9,
+      "deadline": "2025-12-25",
+      "estimatedHours": 2000,
+      "actualHours": 0,
+      "status": "pending"
+    },
+    {
+      "id": "g1772708873969",
+      "title": "数学一（高数+线代+概率论）",
+      "parentId": "g1772708866332",
+      "longTermValue": 1,
+      "urgency": 0.95,
+      "deadline": "2025-12-20",
+      "estimatedHours": 500,
+      "actualHours": 0,
+      "status": "pending"
+    },
+    {
+      "id": "g1772708873980",
+      "title": "计算机专业课408（数据结构+组成原理+操作系统+计算机网络）",
+      "parentId": "g1772708866332",
+      "longTermValue": 1,
+      "urgency": 0.9,
+      "deadline": "2025-12-20",
+      "estimatedHours": 450,
+      "actualHours": 0,
+      "status": "pending"
+    },
+    {
+      "id": "g1772708873988",
+      "title": "英语一（单词+阅读+写作）",
+      "parentId": "g1772708866332",
+      "longTermValue": 0.9,
+      "urgency": 0.85,
+      "deadline": "2025-12-20",
+      "estimatedHours": 400,
+      "actualHours": 0,
+      "status": "pending"
+    },
+    {
+      "id": "g1772708873996",
+      "title": "政治（马原+近代史+毛中特+思修）",
+      "parentId": "g1772708866332",
+      "longTermValue": 0.85,
+      "urgency": 0.7,
+      "deadline": "2025-12-20",
+      "estimatedHours": 200,
+      "actualHours": 0,
+      "status": "pending"
+    }
+  ],
+  "weeklyAvailableHours": 56,
+  "weeklyDemandHours": 3550,
+  "delayRate": 1,
+  "completionRate": 0,
+  "stressIndex": 4.11,
+  "consecutiveMissedDays": 0,
+  "fatigueScore": 0,
+  "interventionMode": "light",
+  "riskLevel": "high"
+}
