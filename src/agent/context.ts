@@ -53,36 +53,27 @@ export async function compressHistory(
   history: CoreMessage[]
 ): Promise<string> {
   const COMPRESS_SYSTEM = `
-你是一个 Agent 执行历史压缩器。将以下执行历史总结为结构化摘要，输出格式如下（使用 XML 标签）：
+总结执行历史为密集格式（XML）：
+<completed>已完成操作（每行一条，仅关键细节）</completed>
+<remaining>未完成任务</remaining>
+<state>当前状态（文件、变量、环境）</state>
+<notes>踩过的坑、特殊处理</notes>
 
-<completed>
-已完成的具体操作（每行一条，保留关键细节）
-</completed>
-
-<remaining>
-还未完成的任务或子任务
-</remaining>
-
-<current_state>
-当前状态：已修改的文件路径、关键变量、环境状态等
-</current_state>
-
-<notes>
-注意事项：踩过的坑、特殊处理、边界条件
-</notes>
-
-要求：信息密度高，去掉废话，保留所有对后续执行有用的细节。
+要求：极度精简，每条信息 ≤ 20 字
 `.trim()
 
-  const historyText = history
+  // 只取最后 N 条消息，减少输入
+  const recentHistory = history.slice(-20) // 只用最近 20 条
+
+  const historyText = recentHistory
     .map((m) => {
       const content =
         typeof m.content === "string"
-          ? m.content
-          : JSON.stringify(m.content)
-      return `[${m.role}]\n${content}`
+          ? m.content.substring(0, 200) // 截断超长内容
+          : JSON.stringify(m.content).substring(0, 200)
+      return `[${m.role}] ${content}`
     })
-    .join("\n\n---\n\n")
+    .join("\n")
 
   const { text } = await generateText({
     model,
@@ -108,42 +99,21 @@ export function buildCompressionHint(summary: string): string {
 
 // ========== 新增：状态序列化为 Prompt Hint ==========
 export function buildStateHint(state: StudyState): string {
-  const sections: string[] = []
-
-  // 1. 目标树摘要
   const activeGoals = state.goalTree.filter(
     (g) => g.status === "in_progress" || g.status === "delayed"
   )
-  sections.push("## 当前活跃目标")
-  sections.push(
-    activeGoals
-      .map(
-        (g) =>
-          `- [${g.status}] ${g.title} (剩余: ${g.estimatedHours - g.actualHours}h, DDL: ${g.deadline || "无"})`
+
+  // 精简格式，移除冗余标题
+  const lines: string[] = [
+    `活跃目标(${activeGoals.length}): ${activeGoals
+      .map((g) =>
+        `${g.title}[${g.estimatedHours - g.actualHours}h]`
       )
-      .join("\n")
-  )
+      .join(", ")}`,
+    `时间: ${state.weeklyAvailableHours}h可用/${state.weeklyDemandHours}h需求 (${((state.weeklyDemandHours / state.weeklyAvailableHours) * 100).toFixed(0)}%)`,
+    `风险: 延迟${state.delayRate.toFixed(1)} 完成${(state.completionRate * 100).toFixed(0)}% 压力${state.stressIndex.toFixed(1)} [${state.riskLevel}]`,
+    `状态: 连续未完成${state.consecutiveMissedDays}d 疲劳${(state.fatigueScore * 100).toFixed(0)}% 模式${state.interventionMode}`,
+  ]
 
-  // 2. 时间预算
-  sections.push("\n## 时间预算")
-  sections.push(`- 本周可用: ${state.weeklyAvailableHours}h`)
-  sections.push(`- 本周需求: ${state.weeklyDemandHours}h`)
-  sections.push(
-    `- 负载率: ${((state.weeklyDemandHours / state.weeklyAvailableHours) * 100).toFixed(1)}%`
-  )
-
-  // 3. 风险指标
-  sections.push("\n## 风险指标")
-  sections.push(`- 延迟率: ${state.delayRate.toFixed(2)}`)
-  sections.push(`- 完成率: ${(state.completionRate * 100).toFixed(1)}%`)
-  sections.push(`- 压力指数: ${state.stressIndex.toFixed(2)}`)
-  sections.push(`- 风险等级: ${state.riskLevel}`)
-
-  // 4. 行为状态
-  sections.push("\n## 行为状态")
-  sections.push(`- 连续未完成: ${state.consecutiveMissedDays} 天`)
-  sections.push(`- 疲劳度: ${(state.fatigueScore * 100).toFixed(1)}%`)
-  sections.push(`- 策略模式: ${state.interventionMode}`)
-
-  return sections.join("\n")
+  return lines.join("\n")
 }

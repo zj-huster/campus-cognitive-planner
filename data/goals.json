@@ -53,5 +53,104 @@
     "estimatedHours": 200,
     "actualHours": 0,
     "status": "pending"
+  },
+  {
+    "id": "g1772724118660",
+    "title": "考研目标：北京大学计算机科学专业",
+    "parentId": null,
+    "longTermValue": 1,
+    "urgency": 0.9,
+    "deadline": "2026-12-25",
+    "estimatedHours": 2000,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772724126505",
+    "title": "数学一（高等数学+线性代数+概率论）",
+    "parentId": "g1772724118660",
+    "longTermValue": 0.95,
+    "urgency": 0.9,
+    "deadline": "2026-12-25",
+    "estimatedHours": 500,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772724126522",
+    "title": "英语一（词汇+阅读+写作+翻译）",
+    "parentId": "g1772724118660",
+    "longTermValue": 0.9,
+    "urgency": 0.85,
+    "deadline": "2026-12-25",
+    "estimatedHours": 400,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772724126537",
+    "title": "政治（马原+近代史+毛中特+思修）",
+    "parentId": "g1772724118660",
+    "longTermValue": 0.8,
+    "urgency": 0.7,
+    "deadline": "2026-12-25",
+    "estimatedHours": 300,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772724126554",
+    "title": "专业课408（数据结构+操作系统+计算机组成原理+计算机网络）",
+    "parentId": "g1772724118660",
+    "longTermValue": 1,
+    "urgency": 0.95,
+    "deadline": "2026-12-25",
+    "estimatedHours": 600,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772724134593",
+    "title": "数学一 - 基础阶段（教材精读+例题）",
+    "parentId": "g1772724126505",
+    "longTermValue": 0.9,
+    "urgency": 0.95,
+    "deadline": "2026-06-30",
+    "estimatedHours": 160,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772724134605",
+    "title": "英语一 - 基础阶段（单词+长难句+基础阅读）",
+    "parentId": "g1772724126522",
+    "longTermValue": 0.85,
+    "urgency": 0.9,
+    "deadline": "2026-06-30",
+    "estimatedHours": 120,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772724134617",
+    "title": "408 - 基础阶段（数据结构+操作系统精读）",
+    "parentId": "g1772724126554",
+    "longTermValue": 0.95,
+    "urgency": 0.95,
+    "deadline": "2026-06-30",
+    "estimatedHours": 200,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1772724134627",
+    "title": "政治 - 基础阶段（暑期前预习马原）",
+    "parentId": "g1772724126537",
+    "longTermValue": 0.7,
+    "urgency": 0.5,
+    "deadline": "2026-07-31",
+    "estimatedHours": 40,
+    "actualHours": 0,
+    "status": "pending"
   }
 ]

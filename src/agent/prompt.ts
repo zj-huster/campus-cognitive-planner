@@ -3,19 +3,22 @@ import { buildStateHint, type StudyState } from "./context"
 
 const PROMPT_FILE = join(import.meta.dir, "../SYSTEM_PROMPT.md")
 
-const HARD_CONSTRAINTS = `
----
-# 强制执行约束（Runtime Hard Constraints）
+// 缓存静态 prompt（应用启动时加载一次）
+let cachedBasePrompt: string | null = null
 
-你必须始终执行以下要求：
-1) 决策必须覆盖四种能力：目标树、动态负载、风险预测、行为干预。
-2) 输出必须严格使用以下四段且顺序不可变：
-   - 状态摘要
-   - 本周分配
-   - 风险等级
-   - 干预动作
-3) 不能省略“风险等级”和“干预动作”。
-4) 若数据不足，先输出“所需最小数据清单”，再给保守方案。
+async function getBasePrompt(): Promise<string> {
+  if (!cachedBasePrompt) {
+    cachedBasePrompt = await Bun.file(PROMPT_FILE).text()
+  }
+  return cachedBasePrompt
+}
+
+const HARD_CONSTRAINTS = `
+# 强制约束
+1) 决策覆盖四能力：目标树、动态负载、风险预测、行为干预
+2) 输出四段固定顺序：状态摘要 → 本周分配 → 风险等级 → 干预动作
+3) 必须输出风险等级和干预动作
+4) 数据不足时先输出所需数据清单再给保守方案
 `.trim()
 
 export async function assembleSystemPrompt(
@@ -24,10 +27,8 @@ export async function assembleSystemPrompt(
 ): Promise<string> {
   const segments: string[] = []
 
-  // Segment 1: 静态指令
-  segments.push(await Bun.file(PROMPT_FILE).text())
-
-  // Segment 2: 强制约束
+  // 只加载一次
+  segments.push(await getBasePrompt())
   segments.push(HARD_CONSTRAINTS)
 
   // Segment 3: 当前学习状态（核心）
