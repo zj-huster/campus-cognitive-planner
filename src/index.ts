@@ -1,6 +1,7 @@
 import readline from "readline"
 import type { CoreMessage } from "ai"
-import { agentDecisionLoop, resetStepCounter } from "./agent/loop"
+import { agentDecisionLoopQueued, RateLimitError, resetStepCounter } from "./agent/loop"
+import { getGlobalQueue } from "./agent/request-queue"
 import {
   shouldCompress,
   compressHistory,
@@ -34,12 +35,6 @@ function parseDailyHours(input: string): number | null {
   const value = Number(matched[1])
   if (!Number.isFinite(value) || value <= 0) return null
   return value
-}
-
-//错误识别：调用本地降级流程
-function isRateLimitError(error: unknown): boolean {
-  const message = (error as Error)?.message?.toLowerCase() ?? ""
-  return message.includes("rate limit") || message.includes("rpm") || message.includes("429")
 }
 
 //本地降级流程：在模型不可用时，基于当前状态和简单规则生成回答
@@ -109,6 +104,7 @@ function printHelp() {
 \x1b[1mcampus-cognitive-planner\x1b[0m — 校园效率规划Agent
 \x1b[1m可用命令：\x1b[0m
   /reset   清空当前会话历史，重新开始
+  /queue   查看请求队列状态
   /exit    退出
   /state   查看当前状态摘要
   /help    显示此帮助
@@ -156,6 +152,16 @@ function prompt() {
       return
     }
 
+    if (question === "/queue") {
+      const queue = getGlobalQueue()
+      const status = queue.getStatus()
+      console.log(
+        `\x1b[90m[队列] 长度: ${status.queueLength} | 飞行中: ${status.requestsInFlight} | 处理中: ${status.processing ? "是" : "否"}\x1b[0m`
+      )
+      prompt()
+      return
+    }
+
     if (!question) {
       prompt()
       return
@@ -164,13 +170,18 @@ function prompt() {
     resetStepCounter()
 
     try {
-      //获取当前状态并进入决策循环
+      // 获取当前状态并通过队列执行决策循环
+      // 所有请求都会按顺序进入队列，避免并发导致的限流
       const state = await refreshState()
-      const { text, responseMessages, usage, stepCount } = await agentDecisionLoop(
+      const queue = getGlobalQueue()
+      
+      const { text, responseMessages, usage, stepCount } = await agentDecisionLoopQueued(
         state,
         question,
         history,
-        runtimeHints
+        runtimeHints,
+        3, // 最多重试3次
+        queue
       )
 
       history.push({ role: "user", content: question })
@@ -197,14 +208,18 @@ function prompt() {
         }
       }
     } catch (e) {
-      //错误识别：调用本地降级流程
-      if (isRateLimitError(e)) {
-        console.warn("\n\x1b[33m[模型限流，已切换本地降级流程并继续执行]\x1b[0m")
+      //错误识别：3次重试都失败的限流错误才调用降级流程
+      if (e instanceof RateLimitError) {
+        console.warn(
+          `\n\x1b[33m[限流已达到重试上限 (${(e as RateLimitError).retryAfter}ms 后可重试)，切换本地降级流程]\x1b[0m`
+        )
         try {
           const fallback = await runLocalFallback(question)
           console.log(fallback)
         } catch (fallbackError) {
-          console.error(`\n\x1b[31m[降级流程失败] ${(fallbackError as Error).message}\x1b[0m`)
+          console.error(
+            `\n\x1b[31m[降级流程失败] ${(fallbackError as Error).message}\x1b[0m`
+          )
         }
       } else {
         console.error(`\n\x1b[31m[错误] ${(e as Error).message}\x1b[0m`)
