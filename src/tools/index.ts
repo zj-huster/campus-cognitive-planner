@@ -6,7 +6,7 @@ import { editFile } from "./edit-file"
 import { bash } from "./bash"
 import { webFetch } from "./web-fetch"
 import { addGoal, updateGoal, getGoalSummary } from "./goal-tree"
-import { generateScheduleReport } from "./scheduler"
+import { generateScheduleReport, generateDailyScheduleReport } from "./scheduler"
 import { generateRiskReport } from "./risk-predict"
 import { autoIntervene } from "./intervention"
 import { initializeState, refreshState } from "./memory-store"
@@ -131,6 +131,24 @@ export const TOOLS = {
         .describe("本周可用总小时数"),
     }),
     execute: async ({ availableHours }) => generateScheduleReport(availableHours),
+  }),
+
+  generate_daily_schedule: tool({
+    description: "生成详细的7天日计划（每天6个时段：早中晚各2个）",
+    parameters: z.object({
+      availableHours: z
+        .number()
+        .describe("本周可用总小时数"),
+      startDate: z
+        .string()
+        .optional()
+        .describe("开始日期 ISO 8601 格式，默认今天"),
+    }),
+    execute: async ({ availableHours, startDate }) => {
+      const weekResult = await generateScheduleReport(availableHours)
+      const start = startDate ? new Date(startDate) : new Date()
+      return generateDailyScheduleReport([], start)
+    },
   }),
 
   assess_risk: tool({

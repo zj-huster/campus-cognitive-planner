@@ -18,9 +18,9 @@ export class RequestQueue {
 
   // 配置参数
   private maxConcurrent: number = 1 // 最多同时发出1个请求
-  private minIntervalMs: number = 500 // 请求间隔最少500ms
+  private minIntervalMs: number = 2000 // 请求间隔最少2000ms（增加到2秒以避免限流）
 
-  constructor(maxConcurrent: number = 1, minIntervalMs: number = 500) {
+  constructor(maxConcurrent: number = 1, minIntervalMs: number = 2000) {
     this.maxConcurrent = maxConcurrent
     this.minIntervalMs = minIntervalMs
   }
@@ -144,8 +144,8 @@ let globalQueue: RequestQueue | null = null
 
 export function getGlobalQueue(): RequestQueue {
   if (!globalQueue) {
-    // 配置：最多1个并发请求，请求间隔500ms
-    globalQueue = new RequestQueue(1, 500)
+    // 配置：最多1个并发请求，请求间隔2000ms
+    globalQueue = new RequestQueue(1, 2000)
   }
   return globalQueue
 }

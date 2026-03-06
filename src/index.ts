@@ -1,4 +1,6 @@
 import readline from "readline"
+import { join } from "path"
+import { mkdir } from "fs/promises"
 import type { CoreMessage } from "ai"
 import { agentDecisionLoopQueued, RateLimitError, resetStepCounter } from "./agent/loop"
 import { getGlobalQueue } from "./agent/request-queue"
@@ -11,6 +13,7 @@ import { initializeState, refreshState } from "./tools/memory-store"
 import { autoIntervene, loadState, saveState } from "./tools/intervention"
 import { scheduleWeek } from "./tools/scheduler"
 import { calculateRisk } from "./tools/risk-predict"
+import { resolveSafePath } from "./utils/safety"
 
 //全局变量
 const rl = readline.createInterface({
@@ -36,6 +39,65 @@ function parseDailyHours(input: string): number | null {
   if (!Number.isFinite(value) || value <= 0) return null
   return value
 }
+
+// 将回答保存到 markdown 文件
+async function saveAnswerToFile(content: string, userQuestion: string): Promise<string> {
+  const logsDir = resolveSafePath("data/logs", "write")
+  await mkdir(logsDir, { recursive: true })
+  
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1)
+  const filename = `${timestamp}.md`
+  const filePath = join(logsDir, filename)
+  
+  const fileContent = [
+    `# Agent 回答记录\n`,
+    `**时间**: ${new Date().toLocaleString("zh-CN")}\n`,
+    `**用户提问**: ${userQuestion}\n`,
+    `---\n`,
+    content
+  ].join("\n")
+  
+  await Bun.write(filePath, fileContent)
+  return filePath
+}
+
+// 从完整回答中提取摘要
+function extractSummary(fullText: string): string {
+  const lines = fullText.split("\n")
+  const summary: string[] = []
+  
+  // 提取关键信息：风险等级、目标数、完成率
+  const riskMatch = fullText.match(/等级[：:]\s*(\S+)/i) || fullText.match(/## 风险等级[\s\S]*?等级[：:]\s*(\S+)/i)
+  const completionMatch = fullText.match(/已完成\s*(\d+)%/i) || fullText.match(/完成率[：:]\s*(\d+)/i)
+  const goalsMatch = fullText.match(/共有\s*(\d+)\s*个.*目标/i) || fullText.match(/共\s*(\d+)\s*个学习目标/i)
+  
+  summary.push("✅ 任务完成\n")
+  
+  if (goalsMatch) {
+    summary.push(`📊 目标统计：${goalsMatch[1]} 个目标`)
+  }
+  
+  if (completionMatch) {
+    summary.push(`📈 完成进度：${completionMatch[1]}%`)
+  }
+  
+  if (riskMatch) {
+    const riskLevel = riskMatch[1]
+    const riskEmoji = riskLevel.includes("高") ? "🔴" : riskLevel.includes("中") ? "🟡" : "🟢"
+    summary.push(`${riskEmoji} 风险等级：${riskLevel}`)
+  }
+  
+  // 提取优先级任务信息
+  const priorityMatch = fullText.match(/\[?P1|🥇[^\n]*数学[^\n]*/i)
+  if (priorityMatch) {
+    summary.push(`⭐ 本周P1任务已生成`)
+  }
+  
+  summary.push(`\n📄 完整回答已保存到 data/logs/ 目录`)
+  
+  return summary.join("\n")
+}
+
 
 //本地降级流程：在模型不可用时，基于当前状态和简单规则生成回答
 async function runLocalFallback(question: string): Promise<string> {
@@ -187,10 +249,11 @@ function prompt() {
       history.push({ role: "user", content: question })
       history.push(...responseMessages)
 
-      if (stepCount > 1) {
-        console.log(`\n\x1b[36m── 最终回答 ─────────────────────────────────────\x1b[0m`)
-      }
-      console.log(text)
+      // 将完整回答保存到文件，并显示摘要
+      const savedPath = await saveAnswerToFile(text, question)
+      const summary = extractSummary(text)
+      
+      console.log(`\n\x1b[36m── 任务完成 ────────────────────────────────────\x1b[0m\n${summary}`)
 
       const synced = await refreshState()
       await saveState(synced)
@@ -198,8 +261,8 @@ function prompt() {
       if (shouldCompress(usage.promptTokens)) {
         console.log("\n\x1b[33m[上下文接近上限，正在压缩...]\x1b[0m")
         try {
-          const summary = await compressHistory(history)
-          const hint = buildCompressionHint(summary)
+          const compressedSummary = await compressHistory(history)
+          const hint = buildCompressionHint(compressedSummary)
           history = []
           runtimeHints = [hint]
           console.log("\x1b[90m[上下文已压缩，下次对话继续]\x1b[0m")
@@ -215,7 +278,9 @@ function prompt() {
         )
         try {
           const fallback = await runLocalFallback(question)
-          console.log(fallback)
+          const savedPath = await saveAnswerToFile(fallback, question)
+          const summary = extractSummary(fallback)
+          console.log(`\n\x1b[36m── 任务完成（降级模式）────────────────────────\x1b[0m\n${summary}`)
         } catch (fallbackError) {
           console.error(
             `\n\x1b[31m[降级流程失败] ${(fallbackError as Error).message}\x1b[0m`

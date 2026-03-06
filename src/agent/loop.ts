@@ -39,7 +39,7 @@ export async function agentDecisionLoopWithRetry(
   userInstruction: string,
   history: CoreMessage[] = [],
   runtimeHints: string[] = [],
-  maxRetries: number = 3
+  maxRetries: number = 5
 ): Promise<RunResult> {
   let lastError: Error | null = null
 
@@ -81,7 +81,7 @@ export async function agentDecisionLoopQueued(
   userInstruction: string,
   history: CoreMessage[] = [],
   runtimeHints: string[] = [],
-  maxRetries: number = 3,
+  maxRetries: number = 5,
   queue?: any // 接受任何 RequestQueue 实例或 undefined
 ): Promise<RunResult> {
   // 动态导入以避免循环依赖
@@ -130,51 +130,6 @@ export async function agentDecisionLoop(
     },
   })
 
-  const stepCount = result.steps.length
-  if (stepCount > 1) {
-    console.log(`\n\x1b[90m[共执行 ${stepCount} 步]\x1b[0m\n`)
-  }
-
-  return {
-    text: result.text,
-    responseMessages: result.response.messages as CoreMessage[],
-    usage: result.usage,
-    stepCount,
-  }
-}
-
-// ========== 原有通用循环（保留兼容） ==========
-export async function agentLoop(
-  question: string,
-  history: CoreMessage[],
-  runtimeHints: string[] = []
-): Promise<RunResult> {
-  const system = await assembleSystemPrompt(undefined, runtimeHints)
-
-  // 将用户问题追加到 history（generateText 需要完整的 messages 数组）
-  const messages: CoreMessage[] = [
-    ...history,
-    { role: "user", content: question },
-  ]
-
-  const result = await generateText({
-    model,
-    system,
-    messages,
-    tools: TOOLS,
-    maxSteps: 10, // ReAct 最大轮次，防止无限循环
-
-    // 每步完成后的回调：打印执行过程
-    // 最后一步（无工具调用、finishReason=stop）不打印，由外层统一输出最终结果
-    onStepFinish: ({ text, toolCalls, finishReason }) => {
-      const isFinalStep = finishReason === "stop" && toolCalls.length === 0
-      if (!isFinalStep) {
-        printStep({ text, toolCalls, finishReason })
-      }
-    },
-  })
-
-  // steps 包含所有中间步骤，打印总步数
   const stepCount = result.steps.length
   if (stepCount > 1) {
     console.log(`\n\x1b[90m[共执行 ${stepCount} 步]\x1b[0m\n`)
