@@ -10,6 +10,17 @@ export interface QueuedRequest<T> {
   reject?: (reason: Error) => void
 }
 
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return parsed
+}
+
+const DEFAULT_MAX_CONCURRENT = parsePositiveIntEnv("QUEUE_MAX_CONCURRENT", 1)
+const DEFAULT_MIN_INTERVAL_MS = parsePositiveIntEnv("QUEUE_MIN_INTERVAL_MS", 4000)
+
 export class RequestQueue {
   private queue: QueuedRequest<any>[] = []
   private processing = false
@@ -18,9 +29,12 @@ export class RequestQueue {
 
   // 配置参数
   private maxConcurrent: number = 1 // 最多同时发出1个请求
-  private minIntervalMs: number = 2000 // 请求间隔最少2000ms（增加到2秒以避免限流）
+  private minIntervalMs: number = DEFAULT_MIN_INTERVAL_MS // 请求间隔，默认4秒（可通过环境变量调整）
 
-  constructor(maxConcurrent: number = 1, minIntervalMs: number = 2000) {
+  constructor(
+    maxConcurrent: number = DEFAULT_MAX_CONCURRENT,
+    minIntervalMs: number = DEFAULT_MIN_INTERVAL_MS
+  ) {
     this.maxConcurrent = maxConcurrent
     this.minIntervalMs = minIntervalMs
   }
@@ -144,8 +158,8 @@ let globalQueue: RequestQueue | null = null
 
 export function getGlobalQueue(): RequestQueue {
   if (!globalQueue) {
-    // 配置：最多1个并发请求，请求间隔2000ms
-    globalQueue = new RequestQueue(1, 2000)
+    // 配置：默认最多1个并发请求，请求间隔4000ms
+    globalQueue = new RequestQueue(DEFAULT_MAX_CONCURRENT, DEFAULT_MIN_INTERVAL_MS)
   }
   return globalQueue
 }

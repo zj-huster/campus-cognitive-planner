@@ -1,5 +1,6 @@
 import { loadGoalTree, calculateWeight } from "./goal-tree"
 import type { GoalNode } from "../agent/context"
+import { replaceAutoTasksForWeek } from "./task-store"
 
 interface ScheduleResult {
   allocations: Array<{
@@ -45,7 +46,7 @@ const TIME_SLOTS = [
 export async function scheduleWeek(availableHours: number): Promise<ScheduleResult> {
   const goals = await loadGoalTree()
   const activeGoals = goals.filter(
-    (g) => g.status === "in_progress" || g.status === "delayed"
+    (g) => g.status !== "completed"
   )
 
   if (activeGoals.length === 0) {
@@ -114,6 +115,18 @@ export async function generateScheduleReport(availableHours: number): Promise<st
   return lines.join("\n")
 }
 
+function toISODate(date: Date): string {
+  return date.toISOString().split("T")[0]
+}
+
+function weekStartOf(date: Date): string {
+  const d = new Date(date)
+  const day = d.getDay() || 7
+  d.setDate(d.getDate() - day + 1)
+  d.setHours(0, 0, 0, 0)
+  return toISODate(d)
+}
+
 // 生成日计划
 export async function generateDailySchedules(
   weekAllocations: ScheduleResult["allocations"],
@@ -123,7 +136,6 @@ export async function generateDailySchedules(
   const daysOfWeek = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
   
   // 分配周任务到每天
-  const tasksPerDay = 6 // 每天6个时段
   let currentTaskIndex = 0
   let currentTaskHoursUsed = 0
   
@@ -200,4 +212,57 @@ export async function generateDailyScheduleReport(
   }
   
   return lines.join("\n")
+}
+
+export async function generateAndPersistWeeklyAndDailyTasks(
+  availableHours: number,
+  startDate: Date = new Date()
+): Promise<{
+  weekStart: string
+  weeklyCount: number
+  dailyCount: number
+  weeklyReport: string
+  dailyReport: string
+}> {
+  const scheduleResult = await scheduleWeek(availableHours)
+  const dailySchedules = await generateDailySchedules(scheduleResult.allocations, startDate)
+  const weekStart = weekStartOf(startDate)
+
+  const weeklyTasks = scheduleResult.allocations.map((alloc) => ({
+    title: alloc.title,
+    goalId: alloc.goalId,
+    level: "weekly" as const,
+    date: null,
+    weekStart,
+    plannedHours: alloc.allocatedHours,
+    actualHours: 0,
+    priority: alloc.priority as "P0" | "P1",
+    status: "pending" as const,
+  }))
+
+  const dailyTasks = dailySchedules.flatMap((day) =>
+    day.slots
+      .filter((slot) => slot.taskTitle)
+      .map((slot) => ({
+        title: `${slot.taskTitle} (${slot.period}${slot.slot})`,
+        goalId: slot.goalId ?? null,
+        level: "daily" as const,
+        date: day.date,
+        weekStart,
+        plannedHours: Math.round((slot.duration / 60) * 10) / 10,
+        actualHours: 0,
+        priority: "P1" as const,
+        status: "pending" as const,
+      }))
+  )
+
+  await replaceAutoTasksForWeek(weekStart, weeklyTasks, dailyTasks)
+
+  return {
+    weekStart,
+    weeklyCount: weeklyTasks.length,
+    dailyCount: dailyTasks.length,
+    weeklyReport: await generateScheduleReport(availableHours),
+    dailyReport: await generateDailyScheduleReport(scheduleResult.allocations, startDate),
+  }
 }

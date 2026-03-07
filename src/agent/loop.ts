@@ -19,6 +19,19 @@ export class RateLimitError extends Error {
   }
 }
 
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return parsed
+}
+
+const DEFAULT_MAX_RETRIES = parsePositiveIntEnv("AGENT_MAX_RETRIES", 5)
+const RETRY_BASE_DELAY_MS = parsePositiveIntEnv("AGENT_RETRY_BASE_DELAY_MS", 4000)
+const RETRY_MAX_DELAY_MS = parsePositiveIntEnv("AGENT_RETRY_MAX_DELAY_MS", 60000)
+const RETRY_JITTER_MS = parsePositiveIntEnv("AGENT_RETRY_JITTER_MS", 1000)
+
 function isRateLimitError(error: unknown): boolean {
   const message = (error as Error)?.message?.toLowerCase() ?? ""
   return (
@@ -39,14 +52,16 @@ export async function agentDecisionLoopWithRetry(
   userInstruction: string,
   history: CoreMessage[] = [],
   runtimeHints: string[] = [],
-  maxRetries: number = 5
+  maxRetries: number = DEFAULT_MAX_RETRIES
 ): Promise<RunResult> {
   let lastError: Error | null = null
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       if (attempt > 0) {
-        const waitMs = Math.pow(2, attempt) * 1000 // 2s, 4s, 8s...
+        const baseWait = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+        const jitter = Math.floor(Math.random() * RETRY_JITTER_MS)
+        const waitMs = Math.min(RETRY_MAX_DELAY_MS, baseWait + jitter)
         console.log(
           `\x1b[33m[重试 ${attempt}/${maxRetries - 1}，等待 ${waitMs}ms...]
 \x1b[0m`
@@ -61,9 +76,13 @@ export async function agentDecisionLoopWithRetry(
         throw error // 非限流错误，立即抛出
       }
       if (attempt === maxRetries - 1) {
+        const recommendedRetryAfter = Math.min(
+          RETRY_MAX_DELAY_MS,
+          RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(maxRetries - 1, 0)) + RETRY_JITTER_MS
+        )
         throw new RateLimitError(
           `模型限流，${maxRetries} 次重试后仍失败`,
-          Math.pow(2, maxRetries) * 1000
+          recommendedRetryAfter
         )
       }
     }
@@ -81,7 +100,7 @@ export async function agentDecisionLoopQueued(
   userInstruction: string,
   history: CoreMessage[] = [],
   runtimeHints: string[] = [],
-  maxRetries: number = 5,
+  maxRetries: number = DEFAULT_MAX_RETRIES,
   queue?: any // 接受任何 RequestQueue 实例或 undefined
 ): Promise<RunResult> {
   // 动态导入以避免循环依赖

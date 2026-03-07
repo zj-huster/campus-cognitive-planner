@@ -5,11 +5,12 @@ import { writeFile } from "./write-file"
 import { editFile } from "./edit-file"
 import { bash } from "./bash"
 import { webFetch } from "./web-fetch"
-import { addGoal, updateGoal, getGoalSummary } from "./goal-tree"
-import { generateScheduleReport, generateDailyScheduleReport } from "./scheduler"
+import { addGoal, updateGoal, getGoalSummary, findGoalByTitle } from "./goal-tree"
+import { generateAndPersistWeeklyAndDailyTasks } from "./scheduler"
 import { generateRiskReport } from "./risk-predict"
 import { autoIntervene } from "./intervention"
 import { initializeState, refreshState } from "./memory-store"
+import { addTask, updateTask, getTaskSummary, clearOutdatedTasks, getWeeklyProgress, syncTasksFromGoals, getTodayTasks, markTaskCompletedByTitle } from "./task-store"
 
 // 工具注册表
 // Vercel AI SDK 的 tool() 封装了参数 schema（Zod）和执行函数
@@ -123,18 +124,86 @@ export const TOOLS = {
     execute: getGoalSummary,
   }),
 
+  find_goal: tool({
+    description: "根据标题关键词模糊查找目标（返回目标ID、状态、进度等信息）",
+    parameters: z.object({
+      titleKeyword: z.string().describe("目标标题关键词（支持模糊匹配）"),
+    }),
+    execute: async ({ titleKeyword }) => findGoalByTitle(titleKeyword),
+  }),
+
+  add_task: tool({
+    description: "添加周任务或日任务到任务池（写入 data/tasks.json）",
+    parameters: z.object({
+      title: z.string().describe("任务名称"),
+      goalId: z.string().optional().describe("关联目标 ID（可选）"),
+      level: z.enum(["weekly", "daily"]).describe("任务层级"),
+      date: z.string().optional().describe("日任务日期 YYYY-MM-DD，仅 daily 需要"),
+      weekStart: z.string().optional().describe("周起始日期 YYYY-MM-DD（可选）"),
+      plannedHours: z.number().describe("计划时长（小时）"),
+      priority: z.enum(["P0", "P1", "P2"]).optional().describe("优先级"),
+    }),
+    execute: addTask,
+  }),
+
+  update_task: tool({
+    description: "更新任务状态/实际时长（写入 data/tasks.json）",
+    parameters: z.object({
+      id: z.string().describe("任务 ID"),
+      actualHours: z.number().optional().describe("实际完成时长"),
+      status: z
+        .enum(["pending", "in_progress", "completed", "deferred"])
+        .optional()
+        .describe("任务状态"),
+    }),
+    execute: updateTask,
+  }),
+
+  get_task_summary: tool({
+    description: "获取当前任务池摘要（读取 data/tasks.json）",
+    parameters: z.object({}),
+    execute: getTaskSummary,
+  }),
+
+  get_today_tasks: tool({
+    description: "获取今日任务清单（按状态分组展示）",
+    parameters: z.object({}),
+    execute: getTodayTasks,
+  }),
+
+  mark_task_completed: tool({
+    description: "根据标题关键词快速标记任务完成（优先匹配今日任务）",
+    parameters: z.object({
+      titleKeyword: z.string().describe("任务标题关键词"),
+      actualHours: z
+        .number()
+        .optional()
+        .describe("实际完成时长，不填则使用计划时长"),
+    }),
+    execute: async ({ titleKeyword, actualHours }) =>
+      markTaskCompletedByTitle(titleKeyword, actualHours),
+  }),
+
   generate_schedule: tool({
-    description: "生成本周时间分配计划",
+    description: "生成本周分配并落盘周/日任务到 data/tasks.json",
     parameters: z.object({
       availableHours: z
         .number()
         .describe("本周可用总小时数"),
     }),
-    execute: async ({ availableHours }) => generateScheduleReport(availableHours),
+    execute: async ({ availableHours }) => {
+      const persisted = await generateAndPersistWeeklyAndDailyTasks(availableHours)
+      return [
+        `已写入 tasks.json：weekStart=${persisted.weekStart}`,
+        `周任务 ${persisted.weeklyCount} 条，日任务 ${persisted.dailyCount} 条`,
+        "",
+        persisted.weeklyReport,
+      ].join("\n")
+    },
   }),
 
   generate_daily_schedule: tool({
-    description: "生成详细的7天日计划（每天6个时段：早中晚各2个）",
+    description: "生成详细7天日计划并落盘到 data/tasks.json",
     parameters: z.object({
       availableHours: z
         .number()
@@ -145,9 +214,40 @@ export const TOOLS = {
         .describe("开始日期 ISO 8601 格式，默认今天"),
     }),
     execute: async ({ availableHours, startDate }) => {
-      const weekResult = await generateScheduleReport(availableHours)
       const start = startDate ? new Date(startDate) : new Date()
-      return generateDailyScheduleReport([], start)
+      const persisted = await generateAndPersistWeeklyAndDailyTasks(availableHours, start)
+      return [
+        `已写入 tasks.json：weekStart=${persisted.weekStart}`,
+        `周任务 ${persisted.weeklyCount} 条，日任务 ${persisted.dailyCount} 条`,
+        "",
+        persisted.dailyReport,
+      ].join("\n")
+    },
+  }),
+
+  clear_outdated_tasks: tool({
+    description: "清理过期任务（保留本周及未来任务、手动任务、未完成的P0任务）",
+    parameters: z.object({}),
+    execute: clearOutdatedTasks,
+  }),
+
+  get_weekly_progress: tool({
+    description: "获取本周任务进度统计（完成率、时间进度等）",
+    parameters: z.object({}),
+    execute: getWeeklyProgress,
+  }),
+
+  sync_tasks_from_goals: tool({
+    description: "根据目标树变化智能同步本周任务（保留手动任务和已完成任务）",
+    parameters: z.object({
+      availableHours: z
+        .number()
+        .describe("本周可用总小时数"),
+    }),
+    execute: async ({ availableHours }) => {
+      const { loadGoalTree } = await import("./goal-tree")
+      const goalTree = await loadGoalTree()
+      return syncTasksFromGoals(availableHours, goalTree)
     },
   }),
 
@@ -173,7 +273,7 @@ export const TOOLS = {
   }),
 
   refresh_state: tool({
-    description: "刷新学习状态（重新计算所有指标）",
+    description: "刷新学习状态（基于 goals.json + tasks.json 即时计算）",
     parameters: z.object({}),
     execute: async () => {
       const state = await refreshState()
@@ -182,7 +282,7 @@ export const TOOLS = {
   }),
 
   initialize_state: tool({
-    description: "初始化学习状态（首次运行或重置时使用）",
+    description: "初始化学习状态（基于 goals.json + tasks.json 生成快照，不写 state.json）",
     parameters: z.object({}),
     execute: async () => {
       await initializeState()

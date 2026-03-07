@@ -10,7 +10,7 @@ import {
   buildCompressionHint,
 } from "./agent/context"
 import { initializeState, refreshState } from "./tools/memory-store"
-import { autoIntervene, loadState, saveState } from "./tools/intervention"
+import { autoIntervene } from "./tools/intervention"
 import { scheduleWeek } from "./tools/scheduler"
 import { calculateRisk } from "./tools/risk-predict"
 import { resolveSafePath } from "./utils/safety"
@@ -23,12 +23,21 @@ const rl = readline.createInterface({
 
 let history: CoreMessage[] = []
 let runtimeHints: string[] = []
+let preferredWeeklyHours = 50
+
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback
+  return parsed
+}
+
+const AGENT_MAX_RETRIES = parsePositiveIntEnv("AGENT_MAX_RETRIES", 5)
 
 //初始化状态，确保每次启动都有一个基础状态可用
 async function ensureState() {
-  const existing = await loadState()
-  if (existing) return existing
-  return initializeState()
+  return initializeState(preferredWeeklyHours)
 }
 
 //解析用户输入的每天可用小时数
@@ -102,14 +111,13 @@ function extractSummary(fullText: string): string {
 //本地降级流程：在模型不可用时，基于当前状态和简单规则生成回答
 async function runLocalFallback(question: string): Promise<string> {
   //取最新状态
-  const baseState = await refreshState()
+  const baseState = await refreshState(preferredWeeklyHours)
   //解析每日工作时间
   const dailyHours = parseDailyHours(question)
   const availableHours = dailyHours ? Math.round(dailyHours * 7 * 10) / 10 : baseState.weeklyAvailableHours
 
   if (dailyHours) {
-    baseState.weeklyAvailableHours = availableHours
-    await saveState(baseState)
+    preferredWeeklyHours = availableHours
   }
 
   //周计划分配
@@ -119,7 +127,7 @@ async function runLocalFallback(question: string): Promise<string> {
   //根据风险评估生成干预建议
   const interventionText = await autoIntervene(risk.riskLevel, baseState.consecutiveMissedDays)
   //拿到最终同步状态
-  const finalState = await refreshState()
+  const finalState = await refreshState(availableHours)
 
   const scheduleRows = schedule.allocations.length
     ? schedule.allocations
@@ -193,7 +201,7 @@ function prompt() {
     if (question === "/reset") {
       history = []
       runtimeHints = []
-      await initializeState()
+      await initializeState(preferredWeeklyHours)
       console.log("\x1b[90m[会话与状态已重置]\x1b[0m")
       prompt()
       return
@@ -206,7 +214,7 @@ function prompt() {
     }
 
     if (question === "/state") {
-      const state = await refreshState()
+      const state = await refreshState(preferredWeeklyHours)
       console.log(
         `\x1b[90m[风险: ${state.riskLevel} | 可用: ${state.weeklyAvailableHours}h | 需求: ${state.weeklyDemandHours}h | 模式: ${state.interventionMode}]\x1b[0m`
       )
@@ -232,9 +240,14 @@ function prompt() {
     resetStepCounter()
 
     try {
+      const dailyHours = parseDailyHours(question)
+      if (dailyHours) {
+        preferredWeeklyHours = Math.round(dailyHours * 7 * 10) / 10
+      }
+
       // 获取当前状态并通过队列执行决策循环
       // 所有请求都会按顺序进入队列，避免并发导致的限流
-      const state = await refreshState()
+      const state = await refreshState(preferredWeeklyHours)
       const queue = getGlobalQueue()
       
       const { text, responseMessages, usage, stepCount } = await agentDecisionLoopQueued(
@@ -242,7 +255,7 @@ function prompt() {
         question,
         history,
         runtimeHints,
-        3, // 最多重试3次
+        AGENT_MAX_RETRIES,
         queue
       )
 
@@ -250,13 +263,10 @@ function prompt() {
       history.push(...responseMessages)
 
       // 将完整回答保存到文件，并显示摘要
-      const savedPath = await saveAnswerToFile(text, question)
+      await saveAnswerToFile(text, question)
       const summary = extractSummary(text)
       
       console.log(`\n\x1b[36m── 任务完成 ────────────────────────────────────\x1b[0m\n${summary}`)
-
-      const synced = await refreshState()
-      await saveState(synced)
 
       if (shouldCompress(usage.promptTokens)) {
         console.log("\n\x1b[33m[上下文接近上限，正在压缩...]\x1b[0m")
@@ -278,7 +288,7 @@ function prompt() {
         )
         try {
           const fallback = await runLocalFallback(question)
-          const savedPath = await saveAnswerToFile(fallback, question)
+          await saveAnswerToFile(fallback, question)
           const summary = extractSummary(fallback)
           console.log(`\n\x1b[36m── 任务完成（降级模式）────────────────────────\x1b[0m\n${summary}`)
         } catch (fallbackError) {

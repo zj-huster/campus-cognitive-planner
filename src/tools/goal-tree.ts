@@ -20,6 +20,11 @@ interface UpdateGoalParams {
   status?: GoalNode["status"]
 }
 
+interface SyncGoalTreeResult {
+  updated: boolean
+  goals: GoalNode[]
+}
+
 // ========== 互斥锁实现 ==========
 let operationQueue: Promise<any> = Promise.resolve()
 
@@ -121,5 +126,116 @@ export async function getGoalSummary(): Promise<string> {
     return `- [${g.status}] ${g.title} | 权重:${weight} | 剩余:${remaining}h | DDL:${g.deadline || "无"}`
   })
   
+  return lines.join("\n")
+}
+
+// 同步目标树的派生状态：
+// 1) 叶子目标按 actualHours 自动推进状态
+// 2) 父目标按子目标聚合状态，避免父子状态不一致
+export async function syncGoalTreeDerivedState(): Promise<SyncGoalTreeResult> {
+  return withLock(async () => {
+    const goals = await loadGoalTree()
+    if (goals.length === 0) {
+      return { updated: false, goals }
+    }
+
+    const byParent = new Map<string, GoalNode[]>()
+    for (const goal of goals) {
+      if (!goal.parentId) continue
+      const siblings = byParent.get(goal.parentId) ?? []
+      siblings.push(goal)
+      byParent.set(goal.parentId, siblings)
+    }
+
+    let changed = false
+
+    // 先处理叶子目标
+    for (const goal of goals) {
+      const children = byParent.get(goal.id) ?? []
+      if (children.length > 0) continue
+
+      if (goal.actualHours >= goal.estimatedHours && goal.status !== "completed") {
+        goal.status = "completed"
+        changed = true
+        continue
+      }
+
+      if (
+        goal.actualHours > 0 &&
+        goal.actualHours < goal.estimatedHours &&
+        goal.status === "pending"
+      ) {
+        goal.status = "in_progress"
+        changed = true
+      }
+    }
+
+    // 再自底向上处理父目标（多轮直到收敛）
+    let parentChanged = true
+    while (parentChanged) {
+      parentChanged = false
+
+      for (const goal of goals) {
+        const children = byParent.get(goal.id) ?? []
+        if (children.length === 0) continue
+
+        const allCompleted = children.every((c) => c.status === "completed")
+        const anyDelayed = children.some((c) => c.status === "delayed")
+        const anyStarted = children.some(
+          (c) => c.status === "in_progress" || c.status === "completed"
+        )
+
+        let nextStatus: GoalNode["status"] = "pending"
+        if (allCompleted) {
+          nextStatus = "completed"
+        } else if (anyDelayed) {
+          nextStatus = "delayed"
+        } else if (anyStarted) {
+          nextStatus = "in_progress"
+        }
+
+        if (goal.status !== nextStatus) {
+          goal.status = nextStatus
+          parentChanged = true
+          changed = true
+        }
+      }
+    }
+
+    if (changed) {
+      await saveGoalTree(goals)
+    }
+
+    return { updated: changed, goals }
+  })
+}
+
+// 根据标题关键词模糊查找目标
+export async function findGoalByTitle(titleKeyword: string): Promise<string> {
+  const goals = await loadGoalTree()
+  const matched = goals.filter((goal) =>
+    goal.title.toLowerCase().includes(titleKeyword.toLowerCase())
+  )
+
+  if (matched.length === 0) {
+    return `未找到包含 "${titleKeyword}" 的目标`
+  }
+
+  if (matched.length === 1) {
+    const goal = matched[0]
+    return [
+      `找到目标：${goal.title}`,
+      `- ID: ${goal.id}`,
+      `- 状态: ${goal.status}`,
+      `- 进度: ${goal.actualHours}h / ${goal.estimatedHours}h（${((goal.actualHours / goal.estimatedHours) * 100).toFixed(1)}%）`,
+      `- DDL: ${goal.deadline ?? "无"}`,
+      `- 权重: 长期价值${goal.longTermValue} × 紧急度${goal.urgency}`,
+    ].join("\n")
+  }
+
+  const lines = [`找到 ${matched.length} 个匹配目标：`, ""]
+  for (const goal of matched) {
+    lines.push(`- ${goal.title} (ID: ${goal.id}) | 状态: ${goal.status} | 进度: ${goal.actualHours}/${goal.estimatedHours}h`)
+  }
   return lines.join("\n")
 }

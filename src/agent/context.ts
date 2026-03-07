@@ -15,9 +15,27 @@ export interface GoalNode {
   status: "pending" | "in_progress" | "completed" | "delayed"
 }
 
+export interface StudyTask {
+  id: string
+  title: string
+  goalId: string | null
+  level: "weekly" | "daily"
+  date: string | null // daily task date: YYYY-MM-DD
+  weekStart: string // week anchor date: YYYY-MM-DD
+  plannedHours: number
+  actualHours: number
+  priority: "P0" | "P1" | "P2"
+  status: "pending" | "in_progress" | "completed" | "deferred"
+  source: "auto" | "manual"
+}
+
 export interface StudyState {
   // 目标树
   goalTree: GoalNode[]
+
+  // 任务池（来自 tasks.json）
+  weeklyTasks: StudyTask[]
+  dailyTasks: StudyTask[]
 
   // 时间预算
   weeklyAvailableHours: number // 本周可用总时长
@@ -111,6 +129,7 @@ export function buildStateHint(state: StudyState): string {
       )
       .join(", ")}`,
     `时间: ${state.weeklyAvailableHours}h可用/${state.weeklyDemandHours}h需求 (${((state.weeklyDemandHours / state.weeklyAvailableHours) * 100).toFixed(0)}%)`,
+    `任务: 周任务${state.weeklyTasks.length}个 日任务${state.dailyTasks.length}个`,
     `风险: 延迟${state.delayRate.toFixed(1)} 完成${(state.completionRate * 100).toFixed(0)}% 压力${state.stressIndex.toFixed(1)} [${state.riskLevel}]`,
     `状态: 连续未完成${state.consecutiveMissedDays}d 疲劳${(state.fatigueScore * 100).toFixed(0)}% 模式${state.interventionMode}`,
   ]
