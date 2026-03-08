@@ -14,6 +14,10 @@ import { autoIntervene } from "./tools/intervention"
 import { scheduleWeek } from "./tools/scheduler"
 import { calculateRisk } from "./tools/risk-predict"
 import { resolveSafePath } from "./utils/safety"
+import { loadGoalTree } from "./tools/goal-tree"
+import { loadTasks } from "./tools/task-store"
+import type { StudyTask } from "./agent/context"
+import { formatLocalDate, formatLocalDateTime, formatLocalTimestampForFile } from "./utils/datetime"
 
 //全局变量
 const rl = readline.createInterface({
@@ -24,6 +28,15 @@ const rl = readline.createInterface({
 let history: CoreMessage[] = []
 let runtimeHints: string[] = []
 let preferredWeeklyHours = 50
+
+function buildCurrentTimeHint(): string {
+  const now = new Date()
+  return [
+    `[系统时间] 当前本地时间: ${formatLocalDateTime(now)}`,
+    `[系统日期] 今天是: ${formatLocalDate(now)}`,
+    "处理‘今日/明日/昨天’相关请求时，必须以系统日期为准，不要自行猜测。",
+  ].join("\n")
+}
 
 function parsePositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -54,7 +67,7 @@ async function saveAnswerToFile(content: string, userQuestion: string): Promise<
   const logsDir = resolveSafePath("data/logs", "write")
   await mkdir(logsDir, { recursive: true })
   
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, -1)
+  const timestamp = formatLocalTimestampForFile(new Date())
   const filename = `${timestamp}.md`
   const filePath = join(logsDir, filename)
   
@@ -249,12 +262,13 @@ function prompt() {
       // 所有请求都会按顺序进入队列，避免并发导致的限流
       const state = await refreshState(preferredWeeklyHours)
       const queue = getGlobalQueue()
+      const requestRuntimeHints = [...runtimeHints, buildCurrentTimeHint()]
       
       const { text, responseMessages, usage, stepCount } = await agentDecisionLoopQueued(
         state,
         question,
         history,
-        runtimeHints,
+        requestRuntimeHints,
         AGENT_MAX_RETRIES,
         queue
       )

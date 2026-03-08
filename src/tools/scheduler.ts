@@ -1,6 +1,7 @@
 import { loadGoalTree, calculateWeight } from "./goal-tree"
 import type { GoalNode } from "../agent/context"
 import { replaceAutoTasksForWeek } from "./task-store"
+import { formatLocalDate, mondayOfLocalWeek } from "../utils/datetime"
 
 interface ScheduleResult {
   allocations: Array<{
@@ -116,15 +117,11 @@ export async function generateScheduleReport(availableHours: number): Promise<st
 }
 
 function toISODate(date: Date): string {
-  return date.toISOString().split("T")[0]
+  return formatLocalDate(date)
 }
 
 function weekStartOf(date: Date): string {
-  const d = new Date(date)
-  const day = d.getDay() || 7
-  d.setDate(d.getDate() - day + 1)
-  d.setHours(0, 0, 0, 0)
-  return toISODate(d)
+  return mondayOfLocalWeek(date)
 }
 
 // 生成日计划
@@ -178,7 +175,7 @@ export async function generateDailySchedules(
     })
     
     dailySchedules.push({
-      date: date.toISOString().split("T")[0],
+      date: toISODate(date),
       dayOfWeek: daysOfWeek[day],
       slots,
       totalHours: 9, // 6个时段 × 1.5h

@@ -11,6 +11,7 @@ import { generateRiskReport } from "./risk-predict"
 import { autoIntervene } from "./intervention"
 import { initializeState, refreshState } from "./memory-store"
 import { addTask, updateTask, getTaskSummary, clearOutdatedTasks, getWeeklyProgress, syncTasksFromGoals, getTodayTasks, markTaskCompletedByTitle } from "./task-store"
+import { getWeeklyPlanSummary, getDailyPlanSummary } from "./plan-summary"
 
 // 工具注册表
 // Vercel AI SDK 的 tool() 封装了参数 schema（Zod）和执行函数
@@ -287,6 +288,22 @@ export const TOOLS = {
     execute: async () => {
       await initializeState()
       return "状态已初始化"
+    },
+  }),
+
+  get_weekly_plan_summary: tool({
+    description: "获取本周计划的精简摘要（包含任务数、完成率、详细任务列表），用于减少上下文长度",
+    parameters: z.object({}),
+    execute: async () => {
+      return getWeeklyPlanSummary()
+    },
+  }),
+
+  get_daily_plan_summary: tool({
+    description: "获取日计划的精简摘要（包含任务数、完成率、详细任务列表），默认获取最近的日计划，用于减少上下文长度",
+    parameters: z.object({}),
+    execute: async () => {
+      return getDailyPlanSummary()
     },
   }),
 }

@@ -2,6 +2,7 @@ import { mkdir } from "fs/promises"
 import { dirname } from "path"
 import type { StudyTask } from "../agent/context"
 import { resolveSafePath } from "../utils/safety"
+import { formatLocalDate, mondayOfLocalWeek } from "../utils/datetime"
 
 const TASKS_FILE = "data/tasks.json"
 
@@ -30,15 +31,11 @@ function withLock<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 function normalizeDate(date: Date): string {
-  return date.toISOString().split("T")[0]
+  return formatLocalDate(date)
 }
 
 function mondayOf(date: Date): string {
-  const d = new Date(date)
-  const day = d.getDay() || 7
-  d.setDate(d.getDate() - day + 1)
-  d.setHours(0, 0, 0, 0)
-  return normalizeDate(d)
+  return mondayOfLocalWeek(date)
 }
 
 function defaultWeekStart(): string {

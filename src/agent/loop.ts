@@ -1,4 +1,4 @@
-import { generateText, type CoreMessage, type LanguageModelUsage } from "ai"
+import { generateText, type CoreMessage, type LanguageModelUsage, type StepResult } from "ai"
 import { model } from "./provider"
 import { assembleSystemPrompt } from "./prompt"
 import type { StudyState } from "./context"
@@ -9,6 +9,12 @@ export interface RunResult {
   responseMessages: CoreMessage[]
   usage: LanguageModelUsage
   stepCount: number
+}
+
+// 用于存储每次尝试中已完成的步骤
+interface AttemptProgress {
+  completedSteps: StepResult<any>[]
+  messagesBeforeError: CoreMessage[]
 }
 
 // ========== 错误恢复：指数退避重试 ==========
@@ -46,7 +52,7 @@ async function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// 带指数退避重试的包装函数
+// 带指数退避重试的包装函数（支持断点续传）
 export async function agentDecisionLoopWithRetry(
   state: StudyState,
   userInstruction: string,
@@ -55,6 +61,8 @@ export async function agentDecisionLoopWithRetry(
   maxRetries: number = DEFAULT_MAX_RETRIES
 ): Promise<RunResult> {
   let lastError: Error | null = null
+  let accumulatedHistory = [...history] // 累积的历史消息（包含已完成的工具调用）
+  let totalCompletedSteps = 0 // 累积的已完成步骤数
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -63,18 +71,49 @@ export async function agentDecisionLoopWithRetry(
         const jitter = Math.floor(Math.random() * RETRY_JITTER_MS)
         const waitMs = Math.min(RETRY_MAX_DELAY_MS, baseWait + jitter)
         console.log(
-          `\x1b[33m[重试 ${attempt}/${maxRetries - 1}，等待 ${waitMs}ms...]
-\x1b[0m`
+          `\x1b[33m[重试 ${attempt}/${maxRetries - 1}，从第 ${totalCompletedSteps + 1} 步继续，等待 ${waitMs}ms...]\x1b[0m`
         )
         await sleepMs(waitMs)
+        
+        // 设置步骤计数器偏移，让后续步骤编号正确显示
+        setStepCounterOffset(totalCompletedSteps)
       }
 
-      return await agentDecisionLoop(state, userInstruction, history, runtimeHints)
+      // 使用累积的历史进行决策（支持断点续传）
+      const result = await agentDecisionLoop(state, userInstruction, accumulatedHistory, runtimeHints)
+      
+      // 成功完成，返回结果
+      return {
+        ...result,
+        stepCount: totalCompletedSteps + result.stepCount, // 包含所有尝试的步骤总数
+      }
     } catch (error) {
       lastError = error as Error
+      
+      // 检查是否为限流错误
       if (!isRateLimitError(error)) {
         throw error // 非限流错误，立即抛出
       }
+
+      // 限流错误：尝试从错误对象中提取已完成的步骤
+      const partialMessages = extractPartialMessages(error)
+      if (partialMessages.length > 0) {
+        // 计算新增的步骤数（过滤出 assistant 消息）
+        const newStepsCount = partialMessages.filter(m => m.role === 'assistant').length
+        
+        // 将已完成的步骤添加到累积历史中
+        accumulatedHistory = [...accumulatedHistory, ...partialMessages]
+        totalCompletedSteps += newStepsCount
+        
+        console.log(
+          `\x1b[90m[✓ 已保存 ${newStepsCount} 个完成步骤（共 ${partialMessages.length} 条消息）到历史]\x1b[0m`
+        )
+      } else {
+        console.log(
+          `\x1b[90m[⚠ 未能提取已完成步骤，将从头重试]\x1b[0m`
+        )
+      }
+
       if (attempt === maxRetries - 1) {
         const recommendedRetryAfter = Math.min(
           RETRY_MAX_DELAY_MS,
@@ -89,6 +128,24 @@ export async function agentDecisionLoopWithRetry(
   }
 
   throw lastError || new Error("未知错误")
+}
+
+// 从错误对象中提取部分已完成的消息（如果 SDK 支持）
+function extractPartialMessages(error: unknown): CoreMessage[] {
+  // Vercel AI SDK 在某些情况下会在错误对象中附加已完成的消息
+  // 这是一个兜底逻辑，如果 SDK 支持则使用
+  const anyError = error as any
+  if (anyError?.responseMessages && Array.isArray(anyError.responseMessages)) {
+    return anyError.responseMessages as CoreMessage[]
+  }
+  
+  // 如果错误对象中有 messages 字段
+  if (anyError?.messages && Array.isArray(anyError.messages)) {
+    return anyError.messages as CoreMessage[]
+  }
+  
+  // 无法提取，返回空数组
+  return []
 }
 
 /**
@@ -133,32 +190,57 @@ export async function agentDecisionLoop(
     },
   ]
 
-  // 3. 执行决策循环
-  const result = await generateText({
-    model,
-    system,
-    messages,
-    tools: TOOLS,
-    maxSteps: 10,
+  // 3. 收集已完成的步骤消息（用于断点续传）
+  const completedMessages: CoreMessage[] = []
+  let completedStepCount = 0
 
-    onStepFinish: ({ text, toolCalls, finishReason }) => {
-      const isFinalStep = finishReason === "stop" && toolCalls.length === 0
-      if (!isFinalStep) {
-        printStep({ text, toolCalls, finishReason })
-      }
-    },
-  })
+  try {
+    // 4. 执行决策循环
+    const result = await generateText({
+      model,
+      system,
+      messages,
+      tools: TOOLS,
+      maxSteps: 10,
 
-  const stepCount = result.steps.length
-  if (stepCount > 1) {
-    console.log(`\n\x1b[90m[共执行 ${stepCount} 步]\x1b[0m\n`)
-  }
+      onStepFinish: ({ text, toolCalls, toolResults, finishReason, response }) => {
+        const isFinalStep = finishReason === "stop" && toolCalls.length === 0
+        if (!isFinalStep) {
+          printStep({ text, toolCalls, finishReason })
+        }
 
-  return {
-    text: result.text,
-    responseMessages: result.response.messages as CoreMessage[],
-    usage: result.usage,
-    stepCount,
+        // 实时收集已完成的消息（用于断点续传）
+        // response.messages 包含从开始到当前步骤的所有消息
+        if (response.messages && response.messages.length > completedMessages.length) {
+          // 只添加新增的消息
+          const newMessages = (response.messages as CoreMessage[]).slice(completedMessages.length)
+          completedMessages.push(...newMessages)
+          completedStepCount++
+        }
+      },
+    })
+
+    const stepCount = result.steps.length
+    if (stepCount > 1) {
+      console.log(`\n\x1b[90m[共执行 ${stepCount} 步]\x1b[0m\n`)
+    }
+
+    return {
+      text: result.text,
+      responseMessages: result.response.messages as CoreMessage[],
+      usage: result.usage,
+      stepCount,
+    }
+  } catch (error) {
+    // 如果发生错误，将已完成的消息附加到错误对象中（用于断点续传）
+    const enhancedError = error as any
+    if (completedMessages.length > 0) {
+      enhancedError.responseMessages = completedMessages
+      console.log(
+        `\x1b[33m[错误发生前已完成 ${completedStepCount} 个步骤（${completedMessages.length} 条消息），将用于断点续传]\x1b[0m`
+      )
+    }
+    throw enhancedError
   }
 }
 
@@ -170,6 +252,7 @@ interface StepInfo {
 }
 
 let stepCounter = 0
+let isRetryMode = false // 标记是否处于重试模式
 
 function printStep({ text, toolCalls }: StepInfo) {
   stepCounter++
@@ -196,4 +279,11 @@ function printStep({ text, toolCalls }: StepInfo) {
 // 重置步骤计数器（每次新对话调用）
 export function resetStepCounter() {
   stepCounter = 0
+  isRetryMode = false
+}
+
+// 设置步骤计数器的起始值（用于重试时的断点续传）
+export function setStepCounterOffset(offset: number) {
+  stepCounter = offset
+  isRetryMode = offset > 0
 }
