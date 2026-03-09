@@ -4,16 +4,21 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "demo": "bun run src/demo.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.3.19",
     "ai": "^4.3.19",
+    "chalk": "^5.6.2",
+    "marked": "^17.0.4",
+    "marked-terminal": "^7.3.0",
     "readline": "^1.3.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/marked-terminal": "^6.1.1"
   },
   "peerDependencies": {
     "typescript": "^5"

@@ -26,6 +26,7 @@ export class RequestQueue {
   private processing = false
   private requestsInFlight = 0
   private lastRequestTime = 0
+  private cooldownUntil = 0
 
   // 配置参数
   private maxConcurrent: number = 1 // 最多同时发出1个请求
@@ -60,10 +61,6 @@ export class RequestQueue {
       // 按优先级排序（优先级低的排前面）
       this.queue.sort((a, b) => a.priority - b.priority)
 
-      console.log(
-        `\x1b[90m[队列] 新增任务 ${request.id}，当前队列长度: ${this.queue.length}\x1b[0m`
-      )
-
       this.processQueue()
     })
   }
@@ -88,12 +85,11 @@ export class RequestQueue {
 
       // 计算需要等待的时间
       const timeSinceLastRequest = Date.now() - this.lastRequestTime
-      const waitMs = Math.max(0, this.minIntervalMs - timeSinceLastRequest)
+      const intervalWaitMs = Math.max(0, this.minIntervalMs - timeSinceLastRequest)
+      const cooldownWaitMs = Math.max(0, this.cooldownUntil - Date.now())
+      const waitMs = Math.max(intervalWaitMs, cooldownWaitMs)
 
       if (waitMs > 0) {
-        console.log(
-          `\x1b[90m[队列] 等待 ${waitMs}ms 后发送请求 ${request.id}...\x1b[0m`
-        )
         await this.sleep(waitMs)
       }
 
@@ -103,19 +99,14 @@ export class RequestQueue {
       // 执行任务（不等待，允许并发）
       ;(async () => {
         try {
-          console.log(
-            `\x1b[36m[队列] 执行请求 ${request.id}（飞行中: ${this.requestsInFlight}）\x1b[0m`
-          )
           const result = await request.task()
           request.resolve?.(result)
-          console.log(
-            `\x1b[32m[队列] ✓ 请求完成 ${request.id}\x1b[0m`
-          )
         } catch (error) {
+          const retryAfterMs = this.extractRetryAfterMs(error)
+          if (retryAfterMs > 0) {
+            this.cooldownUntil = Math.max(this.cooldownUntil, Date.now() + retryAfterMs)
+          }
           request.reject?.(error as Error)
-          console.log(
-            `\x1b[31m[队列] ✗ 请求失败 ${request.id}: ${(error as Error).message}\x1b[0m`
-          )
         } finally {
           this.requestsInFlight--
           this.processQueue() // 继续处理队列
@@ -146,6 +137,34 @@ export class RequestQueue {
    */
   clear(): void {
     this.queue = []
+  }
+
+  private extractRetryAfterMs(error: unknown): number {
+    const anyError = error as any
+    const candidates = [
+      anyError?.retryAfter,
+      anyError?.retryAfterMs,
+      anyError?.cause?.retryAfter,
+      anyError?.cause?.retryAfterMs,
+    ]
+
+    for (const candidate of candidates) {
+      const parsed = Number(candidate)
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.floor(parsed)
+      }
+    }
+
+    const message = (anyError?.message as string | undefined) ?? ""
+    const byMs = message.match(/(\d{3,})\s*ms/i)
+    if (byMs?.[1]) {
+      const parsed = Number(byMs[1])
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return Math.floor(parsed)
+      }
+    }
+
+    return 0
   }
 
   private sleep(ms: number): Promise<void> {

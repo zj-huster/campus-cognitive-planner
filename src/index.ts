@@ -18,6 +18,18 @@ import { loadGoalTree } from "./tools/goal-tree"
 import { loadTasks } from "./tools/task-store"
 import type { StudyTask } from "./agent/context"
 import { formatLocalDate, formatLocalDateTime, formatLocalTimestampForFile } from "./utils/datetime"
+import {
+  renderMarkdown,
+  printUserMessage,
+  printAssistantMessage,
+  printSystemMessage,
+  printError,
+  printWarning,
+  printSuccess,
+  printDivider,
+  clearScreen
+} from "./utils/markdown"
+import chalk from "chalk"
 
 //全局变量
 const rl = readline.createInterface({
@@ -83,43 +95,6 @@ async function saveAnswerToFile(content: string, userQuestion: string): Promise<
   return filePath
 }
 
-// 从完整回答中提取摘要
-function extractSummary(fullText: string): string {
-  const lines = fullText.split("\n")
-  const summary: string[] = []
-  
-  // 提取关键信息：风险等级、目标数、完成率
-  const riskMatch = fullText.match(/等级[：:]\s*(\S+)/i) || fullText.match(/## 风险等级[\s\S]*?等级[：:]\s*(\S+)/i)
-  const completionMatch = fullText.match(/已完成\s*(\d+)%/i) || fullText.match(/完成率[：:]\s*(\d+)/i)
-  const goalsMatch = fullText.match(/共有\s*(\d+)\s*个.*目标/i) || fullText.match(/共\s*(\d+)\s*个学习目标/i)
-  
-  summary.push("✅ 任务完成\n")
-  
-  if (goalsMatch) {
-    summary.push(`📊 目标统计：${goalsMatch[1]} 个目标`)
-  }
-  
-  if (completionMatch) {
-    summary.push(`📈 完成进度：${completionMatch[1]}%`)
-  }
-  
-  if (riskMatch) {
-    const riskLevel = riskMatch[1]
-    const riskEmoji = riskLevel.includes("高") ? "🔴" : riskLevel.includes("中") ? "🟡" : "🟢"
-    summary.push(`${riskEmoji} 风险等级：${riskLevel}`)
-  }
-  
-  // 提取优先级任务信息
-  const priorityMatch = fullText.match(/\[?P1|🥇[^\n]*数学[^\n]*/i)
-  if (priorityMatch) {
-    summary.push(`⭐ 本周P1任务已生成`)
-  }
-  
-  summary.push(`\n📄 完整回答已保存到 data/logs/ 目录`)
-  
-  return summary.join("\n")
-}
-
 
 //本地降级流程：在模型不可用时，基于当前状态和简单规则生成回答
 async function runLocalFallback(question: string): Promise<string> {
@@ -183,30 +158,48 @@ async function runLocalFallback(question: string): Promise<string> {
 }
 
 function printHelp() {
-  console.log(`
-\x1b[1mcampus-cognitive-planner\x1b[0m — 校园效率规划Agent
-\x1b[1m可用命令：\x1b[0m
-  /reset   清空当前会话历史，重新开始
-  /queue   查看请求队列状态
-  /exit    退出
-  /state   查看当前状态摘要
-  /help    显示此帮助
+  const helpText = `
+# 📚 Campus Cognitive Planner
 
-\x1b[1m可用工具：\x1b[0m
-  read_file   读取文件
-  write_file  写入文件
-  edit_file   局部编辑文件
-  bash        执行 Shell 命令
-  web_fetch   抓取网页内容
-`)
+一个基于AI的校园学习规划助手，帮助你高效管理学习目标和任务。
+
+## 可用命令
+
+- \`/reset\` - 清空当前会话历史，重新开始
+- \`/queue\` - 查看请求队列状态
+- \`/state\` - 查看当前状态摘要
+- \`/clear\` - 清屏
+- \`/help\` - 显示此帮助
+- \`/exit\` 或 \`/quit\` - 退出程序
+
+## 可用工具
+
+- **read_file** - 读取文件内容
+- **write_file** - 写入文件
+- **edit_file** - 局部编辑文件
+- **bash** - 执行Shell命令
+- **web_fetch** - 抓取网页内容
+- **goal_tree** - 管理学习目标
+- **task_store** - 管理学习任务
+- **scheduler** - 周计划生成
+- **risk_predict** - 风险评估
+
+## 使用示例
+
+- "帮我规划这周的学习时间"
+- "评估当前的学习风险"
+- "添加一个新的学习目标"
+- "查看我的任务完成情况"
+`
+  console.log(renderMarkdown(helpText))
 }
 
 function prompt() {
-  rl.question("\n\x1b[34m> \x1b[0m", async (input) => {
+  rl.question(chalk.bold.blue("\n💭 You: "), async (input) => {
     const question = input.trim()
 
     if (question === "/exit" || question === "/quit") {
-      console.log("再见！")
+      printSuccess("再见！")
       rl.close()
       return
     }
@@ -215,7 +208,7 @@ function prompt() {
       history = []
       runtimeHints = []
       await initializeState(preferredWeeklyHours)
-      console.log("\x1b[90m[会话与状态已重置]\x1b[0m")
+      printSystemMessage("会话与状态已重置")
       prompt()
       return
     }
@@ -226,11 +219,24 @@ function prompt() {
       return
     }
 
+    if (question === "/clear") {
+      clearScreen()
+      printSuccess("屏幕已清空")
+      prompt()
+      return
+    }
+
     if (question === "/state") {
       const state = await refreshState(preferredWeeklyHours)
-      console.log(
-        `\x1b[90m[风险: ${state.riskLevel} | 可用: ${state.weeklyAvailableHours}h | 需求: ${state.weeklyDemandHours}h | 模式: ${state.interventionMode}]\x1b[0m`
-      )
+      const stateInfo = `
+**当前状态摘要**
+
+- 🎯 风险等级: ${state.riskLevel}
+- ⏰ 本周可用: ${state.weeklyAvailableHours}h
+- 📊 本周需求: ${state.weeklyDemandHours}h
+- 🔧 干预模式: ${state.interventionMode}
+`
+      console.log(renderMarkdown(stateInfo))
       prompt()
       return
     }
@@ -238,8 +244,8 @@ function prompt() {
     if (question === "/queue") {
       const queue = getGlobalQueue()
       const status = queue.getStatus()
-      console.log(
-        `\x1b[90m[队列] 长度: ${status.queueLength} | 飞行中: ${status.requestsInFlight} | 处理中: ${status.processing ? "是" : "否"}\x1b[0m`
+      printSystemMessage(
+        `队列长度: ${status.queueLength} | 飞行中: ${status.requestsInFlight} | 处理中: ${status.processing ? "是" : "否"}`
       )
       prompt()
       return
@@ -264,6 +270,8 @@ function prompt() {
       const queue = getGlobalQueue()
       const requestRuntimeHints = [...runtimeHints, buildCurrentTimeHint()]
       
+      printSystemMessage("正在思考...")
+      
       const { text, responseMessages, usage, stepCount } = await agentDecisionLoopQueued(
         state,
         question,
@@ -276,42 +284,45 @@ function prompt() {
       history.push({ role: "user", content: question })
       history.push(...responseMessages)
 
-      // 将完整回答保存到文件，并显示摘要
-      await saveAnswerToFile(text, question)
-      const summary = extractSummary(text)
+      // 显示完整的markdown格式回答
+      printDivider()
+      printAssistantMessage(text)
+      printDivider()
       
-      console.log(`\n\x1b[36m── 任务完成 ────────────────────────────────────\x1b[0m\n${summary}`)
+      // 将完整回答保存到文件
+      const savedPath = await saveAnswerToFile(text, question)
+      printSystemMessage(`回答已保存到: ${savedPath}`)
 
       if (shouldCompress(usage.promptTokens)) {
-        console.log("\n\x1b[33m[上下文接近上限，正在压缩...]\x1b[0m")
+        printWarning("上下文接近上限，正在压缩...")
         try {
           const compressedSummary = await compressHistory(history)
           const hint = buildCompressionHint(compressedSummary)
           history = []
           runtimeHints = [hint]
-          console.log("\x1b[90m[上下文已压缩，下次对话继续]\x1b[0m")
+          printSystemMessage("上下文已压缩，下次对话继续")
         } catch (e) {
-          console.warn(`\x1b[33m[压缩失败: ${(e as Error).message}]\x1b[0m`)
+          printWarning(`压缩失败: ${(e as Error).message}`)
         }
       }
     } catch (e) {
       //错误识别：3次重试都失败的限流错误才调用降级流程
       if (e instanceof RateLimitError) {
-        console.warn(
-          `\n\x1b[33m[限流已达到重试上限 (${(e as RateLimitError).retryAfter}ms 后可重试)，切换本地降级流程]\x1b[0m`
+        printWarning(
+          `限流已达到重试上限 (${(e as RateLimitError).retryAfter}ms 后可重试)，切换本地降级流程`
         )
         try {
           const fallback = await runLocalFallback(question)
+          printDivider()
+          printAssistantMessage(fallback)
+          printDivider()
           await saveAnswerToFile(fallback, question)
-          const summary = extractSummary(fallback)
-          console.log(`\n\x1b[36m── 任务完成（降级模式）────────────────────────\x1b[0m\n${summary}`)
+          printSystemMessage("已使用本地降级模式完成")
         } catch (fallbackError) {
-          console.error(
-            `\n\x1b[31m[降级流程失败] ${(fallbackError as Error).message}\x1b[0m`
-          )
+          printError(`降级流程失败: ${(fallbackError as Error).message}`)
         }
       } else {
-        console.error(`\n\x1b[31m[错误] ${(e as Error).message}\x1b[0m`)
+        printError((e as Error).message)
       }
     }
 
@@ -321,11 +332,24 @@ function prompt() {
 
 async function main() {
   await ensureState()
-  console.log(`\x1b[1mcampus-cognitive-planner\x1b[0m \x1b[90mv0.0.1 — 输入 /help 查看帮助\x1b[0m\n`)
+  
+  // 显示欢迎信息
+  clearScreen()
+  const welcomeText = `
+# 🎓 Campus Cognitive Planner
+
+**版本**: v0.0.1  
+**描述**: 基于AI的校园学习规划助手
+
+输入 \`/help\` 查看帮助信息，输入 \`/exit\` 退出程序。
+
+---
+`
+  console.log(renderMarkdown(welcomeText))
   prompt()
 }
 
 main().catch((error) => {
-  console.error(`\x1b[31m[启动失败] ${(error as Error).message}\x1b[0m`)
+  printError(`启动失败: ${(error as Error).message}`)
   process.exit(1)
 })

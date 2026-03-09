@@ -34,9 +34,14 @@ function parsePositiveIntEnv(name: string, fallback: number): number {
 }
 
 const DEFAULT_MAX_RETRIES = parsePositiveIntEnv("AGENT_MAX_RETRIES", 5)
+const AGENT_MAX_STEPS = parsePositiveIntEnv("AGENT_MAX_STEPS", 10)
 const RETRY_BASE_DELAY_MS = parsePositiveIntEnv("AGENT_RETRY_BASE_DELAY_MS", 4000)
 const RETRY_MAX_DELAY_MS = parsePositiveIntEnv("AGENT_RETRY_MAX_DELAY_MS", 60000)
 const RETRY_JITTER_MS = parsePositiveIntEnv("AGENT_RETRY_JITTER_MS", 1000)
+const TRANSIENT_ERROR_EXTRA_DELAY_MS = parsePositiveIntEnv(
+  "AGENT_TRANSIENT_ERROR_DELAY_MS",
+  1500
+)
 
 function isRateLimitError(error: unknown): boolean {
   const message = (error as Error)?.message?.toLowerCase() ?? ""
@@ -46,6 +51,87 @@ function isRateLimitError(error: unknown): boolean {
     message.includes("429") ||
     message.includes("quota")
   )
+}
+
+function isTransientProviderError(error: unknown): boolean {
+  const message = (error as Error)?.message?.toLowerCase() ?? ""
+  return (
+    message.includes("timeout") ||
+    message.includes("timed out") ||
+    message.includes("econnreset") ||
+    message.includes("socket hang up") ||
+    message.includes("503") ||
+    message.includes("502") ||
+    message.includes("gateway") ||
+    message.includes("temporarily unavailable")
+  )
+}
+
+function extractRetryAfterMs(error: unknown): number | null {
+  const anyError = error as any
+
+  const numericCandidates = [
+    anyError?.retryAfter,
+    anyError?.retryAfterMs,
+    anyError?.cause?.retryAfter,
+    anyError?.cause?.retryAfterMs,
+  ]
+
+  for (const candidate of numericCandidates) {
+    const parsed = Number(candidate)
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed)
+    }
+  }
+
+  const headerCandidates = [
+    anyError?.responseHeaders,
+    anyError?.headers,
+    anyError?.response?.headers,
+    anyError?.cause?.response?.headers,
+  ]
+
+  for (const headers of headerCandidates) {
+    const retryAfterValue =
+      headers?.["retry-after"] ??
+      headers?.["Retry-After"] ??
+      (typeof headers?.get === "function" ? headers.get("retry-after") : undefined)
+
+    if (retryAfterValue != null) {
+      const text = String(retryAfterValue).trim()
+      const seconds = Number(text)
+      if (Number.isFinite(seconds) && seconds > 0) {
+        return Math.floor(seconds * 1000)
+      }
+
+      const asDate = Date.parse(text)
+      if (Number.isFinite(asDate)) {
+        const ms = asDate - Date.now()
+        if (ms > 0) {
+          return Math.floor(ms)
+        }
+      }
+    }
+  }
+
+  const message = (anyError?.message as string | undefined) ?? ""
+  const byMs = message.match(/(\d{3,})\s*ms/i)
+  if (byMs?.[1]) {
+    const parsed = Number(byMs[1])
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed)
+    }
+  }
+
+  const bySeconds = message.match(/(?:after|等待|重试).*?(\d{1,3})\s*s/i)
+  if (bySeconds?.[1]) {
+    const parsed = Number(bySeconds[1])
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed * 1000)
+    }
+  }
+
+  return null
 }
 
 async function sleepMs(ms: number): Promise<void> {
@@ -61,6 +147,7 @@ export async function agentDecisionLoopWithRetry(
   maxRetries: number = DEFAULT_MAX_RETRIES
 ): Promise<RunResult> {
   let lastError: Error | null = null
+  let lastRetryAfterFromServer = 0
   let accumulatedHistory = [...history] // 累积的历史消息（包含已完成的工具调用）
   let totalCompletedSteps = 0 // 累积的已完成步骤数
 
@@ -69,7 +156,14 @@ export async function agentDecisionLoopWithRetry(
       if (attempt > 0) {
         const baseWait = RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
         const jitter = Math.floor(Math.random() * RETRY_JITTER_MS)
-        const waitMs = Math.min(RETRY_MAX_DELAY_MS, baseWait + jitter)
+        const serverSuggestedWait = lastRetryAfterFromServer > 0 ? lastRetryAfterFromServer : 0
+        const transientPenalty = isTransientProviderError(lastError)
+          ? TRANSIENT_ERROR_EXTRA_DELAY_MS
+          : 0
+        const waitMs = Math.min(
+          RETRY_MAX_DELAY_MS,
+          Math.max(baseWait + jitter + transientPenalty, serverSuggestedWait)
+        )
         console.log(
           `\x1b[33m[重试 ${attempt}/${maxRetries - 1}，从第 ${totalCompletedSteps + 1} 步继续，等待 ${waitMs}ms...]\x1b[0m`
         )
@@ -89,13 +183,16 @@ export async function agentDecisionLoopWithRetry(
       }
     } catch (error) {
       lastError = error as Error
+      lastRetryAfterFromServer = extractRetryAfterMs(error) ?? 0
       
       // 检查是否为限流错误
-      if (!isRateLimitError(error)) {
+      const isRateLimited = isRateLimitError(error)
+      const isTransient = isTransientProviderError(error)
+      if (!isRateLimited && !isTransient) {
         throw error // 非限流错误，立即抛出
       }
 
-      // 限流错误：尝试从错误对象中提取已完成的步骤
+      // 可重试错误：尝试从错误对象中提取已完成的步骤
       const partialMessages = extractPartialMessages(error)
       if (partialMessages.length > 0) {
         // 计算新增的步骤数（过滤出 assistant 消息）
@@ -115,9 +212,12 @@ export async function agentDecisionLoopWithRetry(
       }
 
       if (attempt === maxRetries - 1) {
-        const recommendedRetryAfter = Math.min(
-          RETRY_MAX_DELAY_MS,
-          RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(maxRetries - 1, 0)) + RETRY_JITTER_MS
+        const recommendedRetryAfter = Math.max(
+          Math.min(
+            RETRY_MAX_DELAY_MS,
+            RETRY_BASE_DELAY_MS * Math.pow(2, Math.max(maxRetries - 1, 0)) + RETRY_JITTER_MS
+          ),
+          lastRetryAfterFromServer || 0
         )
         throw new RateLimitError(
           `模型限流，${maxRetries} 次重试后仍失败`,
@@ -201,7 +301,7 @@ export async function agentDecisionLoop(
       system,
       messages,
       tools: TOOLS,
-      maxSteps: 10,
+      maxSteps: AGENT_MAX_STEPS,
 
       onStepFinish: ({ text, toolCalls, toolResults, finishReason, response }) => {
         const isFinalStep = finishReason === "stop" && toolCalls.length === 0
