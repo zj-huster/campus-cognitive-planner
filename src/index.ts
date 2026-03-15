@@ -308,9 +308,7 @@ function prompt() {
     } catch (e) {
       //错误识别：3次重试都失败的限流错误才调用降级流程
       if (e instanceof RateLimitError) {
-        printWarning(
-          `限流已达到重试上限 (${(e as RateLimitError).retryAfter}ms 后可重试)，切换本地降级流程`
-        )
+        printWarning("若限流已达上限，重试失败，会自动切换本地降级流程。")
         try {
           const fallback = await runLocalFallback(question)
           printDivider()

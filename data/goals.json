@@ -1,1 +1,178 @@
-[]
+[
+  {
+    "id": "g1773047079171",
+    "title": "考研华中科技大学计算机科学与技术",
+    "parentId": null,
+    "longTermValue": 1,
+    "urgency": 0.7,
+    "deadline": "2027-12-25",
+    "estimatedHours": 2000,
+    "actualHours": 0,
+    "status": "in_progress"
+  },
+  {
+    "id": "g1773047086431",
+    "title": "数学一",
+    "parentId": "g1773047079171",
+    "longTermValue": 0.95,
+    "urgency": 0.7,
+    "deadline": "2027-12-25",
+    "estimatedHours": 500,
+    "actualHours": 0,
+    "status": "in_progress"
+  },
+  {
+    "id": "g1773047086444",
+    "title": "英语一",
+    "parentId": "g1773047079171",
+    "longTermValue": 0.9,
+    "urgency": 0.7,
+    "deadline": "2027-12-25",
+    "estimatedHours": 400,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047086454",
+    "title": "政治",
+    "parentId": "g1773047079171",
+    "longTermValue": 0.85,
+    "urgency": 0.4,
+    "deadline": "2027-12-25",
+    "estimatedHours": 200,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047086464",
+    "title": "408计算机专业课",
+    "parentId": "g1773047079171",
+    "longTermValue": 0.95,
+    "urgency": 0.7,
+    "deadline": "2027-12-25",
+    "estimatedHours": 500,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047096523",
+    "title": "数学一 · 基础阶段（教材精读+课后题+历年基础题）",
+    "parentId": "g1773047086431",
+    "longTermValue": 0.95,
+    "urgency": 0.8,
+    "deadline": "2026-08-31",
+    "estimatedHours": 180,
+    "actualHours": 6,
+    "status": "in_progress"
+  },
+  {
+    "id": "g1773047096536",
+    "title": "英语一 · 基础阶段（单词+长难句+基础阅读）",
+    "parentId": "g1773047086444",
+    "longTermValue": 0.9,
+    "urgency": 0.8,
+    "deadline": "2026-08-31",
+    "estimatedHours": 140,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047096551",
+    "title": "408 · 基础阶段（数据结构+组成原理+操作系统+计网 教材）",
+    "parentId": "g1773047086464",
+    "longTermValue": 0.95,
+    "urgency": 0.8,
+    "deadline": "2026-08-31",
+    "estimatedHours": 180,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047105766",
+    "title": "数学一 · 强化阶段（660题+真题专项）",
+    "parentId": "g1773047086431",
+    "longTermValue": 0.95,
+    "urgency": 0.75,
+    "deadline": "2027-09-30",
+    "estimatedHours": 180,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047105779",
+    "title": "英语一 · 强化阶段（真题阅读精练+作文框架）",
+    "parentId": "g1773047086444",
+    "longTermValue": 0.9,
+    "urgency": 0.75,
+    "deadline": "2027-09-30",
+    "estimatedHours": 140,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047105790",
+    "title": "408 · 强化阶段（王道习题册+历年真题）",
+    "parentId": "g1773047086464",
+    "longTermValue": 0.95,
+    "urgency": 0.75,
+    "deadline": "2027-09-30",
+    "estimatedHours": 180,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047105801",
+    "title": "政治 · 强化阶段（精讲精练+1000题）",
+    "parentId": "g1773047086454",
+    "longTermValue": 0.85,
+    "urgency": 0.5,
+    "deadline": "2027-09-30",
+    "estimatedHours": 100,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047232059",
+    "title": "数学一 · 冲刺阶段（模拟卷+查漏补缺）",
+    "parentId": "g1773047086431",
+    "longTermValue": 0.95,
+    "urgency": 0.9,
+    "deadline": "2027-12-20",
+    "estimatedHours": 140,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047232072",
+    "title": "英语一 · 冲刺阶段（作文背诵+全真模拟）",
+    "parentId": "g1773047086444",
+    "longTermValue": 0.9,
+    "urgency": 0.9,
+    "deadline": "2027-12-20",
+    "estimatedHours": 120,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047232082",
+    "title": "408 · 冲刺阶段（模拟卷+错题回顾）",
+    "parentId": "g1773047086464",
+    "longTermValue": 0.95,
+    "urgency": 0.9,
+    "deadline": "2027-12-20",
+    "estimatedHours": 140,
+    "actualHours": 0,
+    "status": "pending"
+  },
+  {
+    "id": "g1773047232095",
+    "title": "政治 · 冲刺阶段（肖四肖八+背诵大题）",
+    "parentId": "g1773047086454",
+    "longTermValue": 0.85,
+    "urgency": 0.9,
+    "deadline": "2027-12-20",
+    "estimatedHours": 100,
+    "actualHours": 0,
+    "status": "pending"
+  }
+]

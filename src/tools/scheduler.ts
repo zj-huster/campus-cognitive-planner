@@ -1,7 +1,11 @@
 import { loadGoalTree, calculateWeight } from "./goal-tree"
-import type { GoalNode } from "../agent/context"
 import { replaceAutoTasksForWeek } from "./task-store"
 import { formatLocalDate, mondayOfLocalWeek } from "../utils/datetime"
+import {
+  loadLearnerProfile,
+  getSubjectAdjustment,
+  getSlotAdjustment,
+} from "./learner-profile"
 
 interface ScheduleResult {
   allocations: Array<{
@@ -46,6 +50,7 @@ const TIME_SLOTS = [
 // 动态负载平衡：按权重分配时间
 export async function scheduleWeek(availableHours: number): Promise<ScheduleResult> {
   const goals = await loadGoalTree()
+  const profile = await loadLearnerProfile()
   const activeGoals = goals.filter(
     (g) => g.status !== "completed"
   )
@@ -60,7 +65,11 @@ export async function scheduleWeek(availableHours: number): Promise<ScheduleResu
   }
 
   // 计算权重
-  const weights = activeGoals.map((g) => calculateWeight(g))
+  const weights = activeGoals.map((g) => {
+    const baseWeight = calculateWeight(g)
+    const subjectFactor = getSubjectAdjustment(profile, g.title)
+    return baseWeight * subjectFactor
+  })
   const totalWeight = weights.reduce((sum, w) => sum + w, 0)
 
   // 初步分配
@@ -129,12 +138,37 @@ export async function generateDailySchedules(
   weekAllocations: ScheduleResult["allocations"],
   startDate: Date = new Date()
 ): Promise<DailySchedule[]> {
+  const profile = await loadLearnerProfile()
   const dailySchedules: DailySchedule[] = []
   const daysOfWeek = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-  
-  // 分配周任务到每天
-  let currentTaskIndex = 0
-  let currentTaskHoursUsed = 0
+  const remainingHoursByGoal = new Map<string, number>()
+  const titleByGoal = new Map<string, string>()
+  for (const allocation of weekAllocations) {
+    remainingHoursByGoal.set(allocation.goalId, allocation.allocatedHours)
+    titleByGoal.set(allocation.goalId, allocation.title)
+  }
+
+  function selectGoalForSlot(slotKey: string): { goalId: string; title: string } | null {
+    let bestGoalId: string | null = null
+    let bestScore = -1
+
+    for (const allocation of weekAllocations) {
+      const remaining = remainingHoursByGoal.get(allocation.goalId) ?? 0
+      if (remaining <= 0) continue
+      const factor = getSlotAdjustment(profile, allocation.title, slotKey)
+      const score = remaining * factor
+      if (score > bestScore) {
+        bestScore = score
+        bestGoalId = allocation.goalId
+      }
+    }
+
+    if (!bestGoalId) return null
+    return {
+      goalId: bestGoalId,
+      title: titleByGoal.get(bestGoalId) ?? "待安排",
+    }
+  }
   
   for (let day = 0; day < 7; day++) {
     const date = new Date(startDate)
@@ -144,31 +178,16 @@ export async function generateDailySchedules(
       let slotTask: TimeSlot = {
         ...slot,
       }
-      
-      // 按优先级分配任务
-      if (currentTaskIndex < weekAllocations.length) {
-        const currentAllocation = weekAllocations[currentTaskIndex]
+
+      const slotKey = `${slot.period}${slot.slot}`
+      const chosen = selectGoalForSlot(slotKey)
+      if (chosen) {
         const slotHours = slot.duration / 60
-        
-        if (
-          currentTaskHoursUsed + slotHours <= currentAllocation.allocatedHours &&
-          currentTaskIndex < weekAllocations.length
-        ) {
-          slotTask.goalId = currentAllocation.goalId
-          slotTask.taskTitle = currentAllocation.title
-          currentTaskHoursUsed += slotHours
-        } else if (currentTaskHoursUsed > 0) {
-          // 当前任务分配完成，移到下一个
-          currentTaskIndex++
-          currentTaskHoursUsed = 0
-          
-          if (currentTaskIndex < weekAllocations.length) {
-            const nextAllocation = weekAllocations[currentTaskIndex]
-            slotTask.goalId = nextAllocation.goalId
-            slotTask.taskTitle = nextAllocation.title
-            currentTaskHoursUsed = slotHours
-          }
-        }
+        slotTask.goalId = chosen.goalId
+        slotTask.taskTitle = chosen.title
+        const oldRemaining = remainingHoursByGoal.get(chosen.goalId) ?? 0
+        const nextRemaining = Math.max(0, oldRemaining - slotHours)
+        remainingHoursByGoal.set(chosen.goalId, nextRemaining)
       }
       
       return slotTask

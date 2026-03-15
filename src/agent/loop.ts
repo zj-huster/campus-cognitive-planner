@@ -148,6 +148,7 @@ export async function agentDecisionLoopWithRetry(
 ): Promise<RunResult> {
   let lastError: Error | null = null
   let lastRetryAfterFromServer = 0
+  let hasShownRetryNotice = false
   let accumulatedHistory = [...history] // 累积的历史消息（包含已完成的工具调用）
   let totalCompletedSteps = 0 // 累积的已完成步骤数
 
@@ -164,9 +165,12 @@ export async function agentDecisionLoopWithRetry(
           RETRY_MAX_DELAY_MS,
           Math.max(baseWait + jitter + transientPenalty, serverSuggestedWait)
         )
-        console.log(
-          `\x1b[33m[重试 ${attempt}/${maxRetries - 1}，从第 ${totalCompletedSteps + 1} 步继续，等待 ${waitMs}ms...]\x1b[0m`
-        )
+        if (!hasShownRetryNotice) {
+          console.log(
+            "\x1b[33m由于大模型调用限流，正在重试断点续传，请耐心等待。\x1b[0m"
+          )
+          hasShownRetryNotice = true
+        }
         await sleepMs(waitMs)
         
         // 设置步骤计数器偏移，让后续步骤编号正确显示
@@ -204,10 +208,6 @@ export async function agentDecisionLoopWithRetry(
         
         console.log(
           `\x1b[90m[✓ 已保存 ${newStepsCount} 个完成步骤（共 ${partialMessages.length} 条消息）到历史]\x1b[0m`
-        )
-      } else {
-        console.log(
-          `\x1b[90m[⚠ 未能提取已完成步骤，将从头重试]\x1b[0m`
         )
       }
 
@@ -336,9 +336,6 @@ export async function agentDecisionLoop(
     const enhancedError = error as any
     if (completedMessages.length > 0) {
       enhancedError.responseMessages = completedMessages
-      console.log(
-        `\x1b[33m[错误发生前已完成 ${completedStepCount} 个步骤（${completedMessages.length} 条消息），将用于断点续传]\x1b[0m`
-      )
     }
     throw enhancedError
   }

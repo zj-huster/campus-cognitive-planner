@@ -3,6 +3,7 @@ import { dirname } from "path"
 import type { StudyTask } from "../agent/context"
 import { resolveSafePath } from "../utils/safety"
 import { formatLocalDate, mondayOfLocalWeek } from "../utils/datetime"
+import { updateLearnerProfileFromTask } from "./learner-profile"
 
 const TASKS_FILE = "data/tasks.json"
 
@@ -99,6 +100,7 @@ export async function updateTask(params: UpdateTaskParams): Promise<string> {
       return `错误：任务 ${params.id} 不存在`
     }
 
+    const previousStatus = task.status
     if (params.actualHours !== undefined) {
       task.actualHours = params.actualHours
     }
@@ -107,6 +109,11 @@ export async function updateTask(params: UpdateTaskParams): Promise<string> {
     }
 
     await saveTasks(tasks)
+
+    if (task.status === "completed" && previousStatus !== "completed") {
+      await updateLearnerProfileFromTask(task)
+    }
+
     return `success: 已更新任务 \"${task.title}\"`
   })
 }
@@ -409,6 +416,7 @@ export async function markTaskCompletedByTitle(
       task.status = "completed"
       task.actualHours = actualHours ?? task.plannedHours
       await saveTasks(tasks)
+      await updateLearnerProfileFromTask(task)
       return `success: 已标记周任务 "${task.title}" 为完成（${task.actualHours}h）`
     }
 
@@ -421,6 +429,7 @@ export async function markTaskCompletedByTitle(
     task.status = "completed"
     task.actualHours = actualHours ?? task.plannedHours
     await saveTasks(tasks)
+    await updateLearnerProfileFromTask(task)
     return `success: 已标记今日任务 "${task.title}" 为完成（${task.actualHours}h）`
   })
 }

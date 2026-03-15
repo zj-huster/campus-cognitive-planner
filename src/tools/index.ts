@@ -12,6 +12,7 @@ import { autoIntervene } from "./intervention"
 import { initializeState, refreshState } from "./memory-store"
 import { addTask, updateTask, getTaskSummary, clearOutdatedTasks, getWeeklyProgress, syncTasksFromGoals, getTodayTasks, markTaskCompletedByTitle } from "./task-store"
 import { getWeeklyPlanSummary, getDailyPlanSummary } from "./plan-summary"
+import { getLearnerProfileSummary } from "./learner-profile"
 
 // 工具注册表
 // Vercel AI SDK 的 tool() 封装了参数 schema（Zod）和执行函数
@@ -304,6 +305,14 @@ export const TOOLS = {
     parameters: z.object({}),
     execute: async () => {
       return getDailyPlanSummary()
+    },
+  }),
+
+  get_learner_profile_summary: tool({
+    description: "获取学习画像摘要（科目效率因子、时段专注因子、样本任务数）",
+    parameters: z.object({}),
+    execute: async () => {
+      return getLearnerProfileSummary()
     },
   }),
 }
