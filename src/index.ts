@@ -67,11 +67,37 @@ async function ensureState() {
 
 //解析用户输入的每天可用小时数
 function parseDailyHours(input: string): number | null {
-  const matched = input.match(/每天\s*(\d+(?:\.\d+)?)\s*小时/u)
+  const normalized = input.trim()
+  const matched = normalized.match(/(?:每天\s*)?(\d+(?:\.\d+)?)\s*(?:小时|h)\s*$/iu)
   if (!matched) return null
   const value = Number(matched[1])
   if (!Number.isFinite(value) || value <= 0) return null
   return value
+}
+
+function extractAssistantText(messages: CoreMessage[]): string {
+  const chunks: string[] = []
+
+  for (const msg of messages) {
+    if (msg.role !== "assistant") continue
+
+    if (typeof msg.content === "string") {
+      const text = msg.content.trim()
+      if (text) chunks.push(text)
+      continue
+    }
+
+    if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (part?.type === "text" && typeof part.text === "string") {
+          const text = part.text.trim()
+          if (text) chunks.push(text)
+        }
+      }
+    }
+  }
+
+  return chunks.join("\n\n").trim()
 }
 
 // 将回答保存到 markdown 文件
@@ -281,16 +307,25 @@ function prompt() {
         queue
       )
 
+      let finalAnswer = text.trim()
+      if (!finalAnswer) {
+        finalAnswer = extractAssistantText(responseMessages)
+      }
+      if (!finalAnswer) {
+        printWarning("模型返回为空，已切换本地降级生成回答。")
+        finalAnswer = await runLocalFallback(question)
+      }
+
       history.push({ role: "user", content: question })
       history.push(...responseMessages)
 
       // 显示完整的markdown格式回答
       printDivider()
-      printAssistantMessage(text)
+      printAssistantMessage(finalAnswer)
       printDivider()
       
       // 将完整回答保存到文件
-      const savedPath = await saveAnswerToFile(text, question)
+      const savedPath = await saveAnswerToFile(finalAnswer, question)
       printSystemMessage(`回答已保存到: ${savedPath}`)
 
       if (shouldCompress(usage.promptTokens)) {

@@ -4,11 +4,28 @@ import { assembleSystemPrompt } from "./prompt"
 import type { StudyState } from "./context"
 import { TOOLS } from "../tools/index"
 
+export interface StepTraceToolCall {
+  toolName: string
+  args: unknown
+}
+
+export interface StepTrace {
+  step: number
+  thought: string
+  finishReason: string
+  toolCalls: StepTraceToolCall[]
+}
+
+export interface AgentLoopOptions {
+  onStepTrace?: (trace: StepTrace) => void
+}
+
 export interface RunResult {
   text: string
   responseMessages: CoreMessage[]
   usage: LanguageModelUsage
   stepCount: number
+  stepTraces: StepTrace[]
 }
 
 // 用于存储每次尝试中已完成的步骤
@@ -144,7 +161,8 @@ export async function agentDecisionLoopWithRetry(
   userInstruction: string,
   history: CoreMessage[] = [],
   runtimeHints: string[] = [],
-  maxRetries: number = DEFAULT_MAX_RETRIES
+  maxRetries: number = DEFAULT_MAX_RETRIES,
+  options?: AgentLoopOptions
 ): Promise<RunResult> {
   let lastError: Error | null = null
   let lastRetryAfterFromServer = 0
@@ -178,7 +196,13 @@ export async function agentDecisionLoopWithRetry(
       }
 
       // 使用累积的历史进行决策（支持断点续传）
-      const result = await agentDecisionLoop(state, userInstruction, accumulatedHistory, runtimeHints)
+      const result = await agentDecisionLoop(
+        state,
+        userInstruction,
+        accumulatedHistory,
+        runtimeHints,
+        options
+      )
       
       // 成功完成，返回结果
       return {
@@ -258,7 +282,8 @@ export async function agentDecisionLoopQueued(
   history: CoreMessage[] = [],
   runtimeHints: string[] = [],
   maxRetries: number = DEFAULT_MAX_RETRIES,
-  queue?: any // 接受任何 RequestQueue 实例或 undefined
+  queue?: any, // 接受任何 RequestQueue 实例或 undefined
+  options?: AgentLoopOptions
 ): Promise<RunResult> {
   // 动态导入以避免循环依赖
   const { getGlobalQueue } = await import("./request-queue")
@@ -266,7 +291,15 @@ export async function agentDecisionLoopQueued(
 
   // 将 Agent 调用提交到队列
   return requestQueue.enqueue(
-    () => agentDecisionLoopWithRetry(state, userInstruction, history, runtimeHints, maxRetries),
+    () =>
+      agentDecisionLoopWithRetry(
+        state,
+        userInstruction,
+        history,
+        runtimeHints,
+        maxRetries,
+        options
+      ),
     50 // 默认优先级
   )
 }
@@ -276,7 +309,8 @@ export async function agentDecisionLoop(
   state: StudyState, // 当前学习状态
   userInstruction: string, // 用户指令（可选，如"生成本周计划"）
   history: CoreMessage[] = [],
-  runtimeHints: string[] = []
+  runtimeHints: string[] = [],
+  options?: AgentLoopOptions
 ): Promise<RunResult> {
   // 1. 组装系统提示词（注入状态）
   const system = await assembleSystemPrompt(state, runtimeHints)
@@ -293,6 +327,7 @@ export async function agentDecisionLoop(
   // 3. 收集已完成的步骤消息（用于断点续传）
   const completedMessages: CoreMessage[] = []
   let completedStepCount = 0
+  const stepTraces: StepTrace[] = []
 
   try {
     // 4. 执行决策循环
@@ -305,8 +340,20 @@ export async function agentDecisionLoop(
 
       onStepFinish: ({ text, toolCalls, toolResults, finishReason, response }) => {
         const isFinalStep = finishReason === "stop" && toolCalls.length === 0
+        const trace: StepTrace = {
+          step: stepTraces.length + 1,
+          thought: text.trim(),
+          finishReason,
+          toolCalls: toolCalls.map((call) => ({
+            toolName: call.toolName,
+            args: call.args,
+          })),
+        }
+
         if (!isFinalStep) {
           printStep({ text, toolCalls, finishReason })
+          stepTraces.push(trace)
+          options?.onStepTrace?.(trace)
         }
 
         // 实时收集已完成的消息（用于断点续传）
@@ -330,6 +377,7 @@ export async function agentDecisionLoop(
       responseMessages: result.response.messages as CoreMessage[],
       usage: result.usage,
       stepCount,
+      stepTraces,
     }
   } catch (error) {
     // 如果发生错误，将已完成的消息附加到错误对象中（用于断点续传）
